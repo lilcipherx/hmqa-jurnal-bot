@@ -113,7 +113,7 @@ services:
 
   worker:
     <<: *app
-    command: ['pnpm', '--filter', '@hmqa/worker', 'start']
+    command: ['node', 'apps/worker/dist/server.js']
     environment:
       PORT: 3003
     volumes:
