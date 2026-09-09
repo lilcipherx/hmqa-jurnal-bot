@@ -8,6 +8,8 @@ import {
 import argon2 from 'argon2';
 import { authenticator } from 'otplib';
 
+const totpVerifier = authenticator.clone({ window: [1, 0] });
+
 export async function hashPassword(password: string): Promise<string> {
   if (password.length < 14) throw new Error('PASSWORD_TOO_SHORT');
   return argon2.hash(password, {
@@ -31,7 +33,7 @@ export function generateTotpSecret(): string {
 }
 
 export function verifyTotp(secret: string, token: string): boolean {
-  return authenticator.check(token.replaceAll(' ', ''), secret);
+  return totpVerifier.check(token.replaceAll(' ', ''), secret);
 }
 
 export function generateTotpCode(secret: string): string {

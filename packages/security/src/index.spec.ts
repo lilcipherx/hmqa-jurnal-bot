@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import { authenticator } from 'otplib';
 import {
   attachmentContentDisposition,
   constantTimeEqual,
   decryptSecret,
   encryptSecret,
+  generateTotpSecret,
   hashOpaqueToken,
   maskEmail,
   maskPhone,
   sanitizeFileName,
+  verifyTotp,
 } from './index.js';
 
 describe('security helpers', () => {
@@ -28,6 +31,18 @@ describe('security helpers', () => {
     expect(encrypted).not.toContain('TOTP-SECRET');
     expect(decryptSecret(encrypted, 'test-encryption-key-material')).toBe('TOTP-SECRET');
     expect(() => decryptSecret(encrypted, 'wrong-encryption-key-material')).toThrow();
+  });
+
+  it('accepts only the current or immediately previous TOTP time window', () => {
+    const secret = generateTotpSecret();
+    const currentWindowStart = Math.floor(Date.now() / 30_000) * 30_000;
+    const previousCode = authenticator.clone({ epoch: currentWindowStart - 1 }).generate(secret);
+    const expiredCode = authenticator
+      .clone({ epoch: currentWindowStart - 30_001 })
+      .generate(secret);
+
+    expect(verifyTotp(secret, previousCode)).toBe(true);
+    expect(verifyTotp(secret, expiredCode)).toBe(false);
   });
 
   it('neutralizes traversal and header injection in untrusted filenames', () => {
