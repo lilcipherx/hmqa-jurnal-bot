@@ -1,11 +1,13 @@
 import { createHmac } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import process from 'node:process';
+import { getBundle } from '@hmqa/i18n';
 
 const apiBase = process.env.APP_BASE_URL ?? 'http://api:3001';
 const webBase = 'http://nginx:8080';
 const password = process.env.SEED_ADMIN_PASSWORD;
 const totpSecret = process.env.SEED_STAFF_TOTP_SECRET;
+const translationKeys = new Set(Object.keys(getBundle('en')));
 if (!password || !totpSecret)
   throw new Error('Seed credentials are required for the runtime probe');
 
@@ -102,9 +104,9 @@ async function webGet(session, path, locale = 'en', { allowTranslationKeys = fal
     throw new Error(`WEB ${path} (${locale}) allows unsafe-inline scripts`);
   }
   const html = await response.text();
-  const rawKey = renderedTextAndLabels(html).match(
-    /\b(?:admin|menu|status|validation)\.[a-z0-9_.-]+\b/,
-  )?.[0];
+  const rawKey = renderedTextAndLabels(html)
+    .match(/\b[a-z][a-z0-9_-]*(?:\.[a-z0-9_.-]+)+\b/g)
+    ?.find((candidate) => translationKeys.has(candidate));
   if (rawKey && !allowTranslationKeys)
     throw new Error(`WEB ${path} (${locale}) leaked raw translation key ${rawKey}`);
   return html;
