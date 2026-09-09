@@ -16,6 +16,24 @@ import { maskEmail, maskPhone } from '@hmqa/security';
 import * as Sentry from '@sentry/node';
 import { HmqaApiError, type DraftState, type HmqaApiClient, type UserState } from './api-client.js';
 
+const databaseLocaleByPublicLocale: Readonly<Record<Locale, 'UZ_LATN' | 'RU' | 'EN'>> = {
+  'uz-Latn': 'UZ_LATN',
+  ru: 'RU',
+  en: 'EN',
+};
+
+function localizedRecord<T extends { locale: 'UZ_LATN' | 'RU' | 'EN' }>(
+  records: readonly T[],
+  locale: Locale,
+): T | undefined {
+  const preferences = [databaseLocaleByPublicLocale[locale], 'RU', 'EN', 'UZ_LATN'] as const;
+  for (const preferred of preferences) {
+    const record = records.find(({ locale: candidate }) => candidate === preferred);
+    if (record) return record;
+  }
+  return undefined;
+}
+
 export type BotApi = Pick<
   HmqaApiClient,
   | 'claimUpdate'
@@ -388,9 +406,14 @@ async function continueDraft(ctx: Context, api: BotApi, locale: Locale, draft: D
     });
   }
   if (draft.machineState === 'REQUIREMENTS_ACK') {
-    const requirement = draft.journal?.currentRequirement;
-    const localization = requirement?.localizations[0];
-    const text = `${localization?.title ?? draft.journal?.code ?? ''}\n\n${localization?.summary ?? localization?.body ?? ''}\n\n${translate(locale, 'requirements.ack', { requirements_version: requirement?.version ?? '?', journal_name: draft.journal?.localizations[0]?.name ?? draft.journal?.code ?? '?' })}`;
+    const requirement = draft.requirementVersion ?? draft.journal?.currentRequirement;
+    const localization = requirement
+      ? localizedRecord(requirement.localizations, locale)
+      : undefined;
+    const journalLocalization = draft.journal
+      ? localizedRecord(draft.journal.localizations, locale)
+      : undefined;
+    const text = `${localization?.title ?? draft.journal?.code ?? ''}\n\n${localization?.summary ?? localization?.body ?? ''}\n\n${translate(locale, 'requirements.ack', { requirements_version: requirement?.version ?? '?', journal_name: journalLocalization?.name ?? draft.journal?.code ?? '?' })}`;
     return ctx.reply(text, {
       reply_markup: new InlineKeyboard()
         .text(translate(locale, 'common.confirm'), `draft:ack:${draft.id}:${draft.rowVersion}`)

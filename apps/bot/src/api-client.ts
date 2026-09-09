@@ -45,6 +45,16 @@ const draftSchema = z.object({
       version: z.number().int(),
       state: z.string(),
       config: z.unknown(),
+      localizations: z.array(
+        z.object({
+          locale: z.enum(['UZ_LATN', 'RU', 'EN']),
+          title: z.string(),
+          summary: z.string(),
+          body: z.string(),
+          help: z.string().nullable(),
+          contact: z.string().nullable(),
+        }),
+      ),
     })
     .nullable()
     .optional(),
@@ -52,7 +62,12 @@ const draftSchema = z.object({
     .object({
       code: z.string(),
       localizations: z.array(
-        z.object({ name: z.string(), description: z.string(), contactText: z.string().nullable() }),
+        z.object({
+          locale: z.enum(['UZ_LATN', 'RU', 'EN']),
+          name: z.string(),
+          description: z.string(),
+          contactText: z.string().nullable(),
+        }),
       ),
       currentRequirement: z
         .object({
@@ -61,6 +76,7 @@ const draftSchema = z.object({
           config: z.unknown(),
           localizations: z.array(
             z.object({
+              locale: z.enum(['UZ_LATN', 'RU', 'EN']),
               title: z.string(),
               summary: z.string(),
               body: z.string(),

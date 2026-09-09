@@ -82,6 +82,127 @@ describe('Telegram conversation', () => {
     expect(resolveUserLocale(undefined, 'unknown')).toBe('uz-Latn');
   });
 
+  it('renders the selected journal and requirement localization in a resumed draft', async () => {
+    const api = {
+      claimUpdate: vi.fn().mockResolvedValue({
+        claimed: true,
+        correlationId: '64d4ef2c-418a-4d9c-a519-33c0abca8d9b',
+      }),
+      completeUpdate: vi.fn().mockResolvedValue(undefined),
+      releaseUpdate: vi.fn().mockResolvedValue(undefined),
+      syncUser: vi.fn().mockResolvedValue({
+        id: '4ef0649f-c2de-48ab-a8a7-f3bea4de9e04',
+        locale: 'ru',
+        status: 'ACTIVE',
+        consentActive: true,
+        profile: null,
+        activeDraft: {
+          id: '83a7a9e3-b6af-4a37-a873-d83dc3f09ccc',
+          journalId: '43c0f310-e5ad-4565-b69d-bada3fd88512',
+          requirementVersionId: '58be2910-4ed7-411e-be5a-d6c2fdb31dc1',
+          machineState: 'REQUIREMENTS_ACK',
+          expectedInputType: 'CALLBACK',
+          context: {},
+          rowVersion: 1,
+          expiresAt: new Date('2027-01-01'),
+          files: [],
+          preflightRuns: [],
+          requirementVersion: {
+            id: '58be2910-4ed7-411e-be5a-d6c2fdb31dc1',
+            version: 1,
+            state: 'PUBLISHED',
+            config: {},
+            localizations: [
+              {
+                locale: 'UZ_LATN',
+                title: 'O‘zbek talablar',
+                summary: 'O‘zbek xulosa',
+                body: 'O‘zbek matn',
+                help: null,
+                contact: null,
+              },
+              {
+                locale: 'RU',
+                title: 'Русские требования',
+                summary: 'Русское резюме',
+                body: 'Русский текст',
+                help: null,
+                contact: null,
+              },
+            ],
+          },
+          journal: {
+            code: 'UAT',
+            localizations: [
+              {
+                locale: 'UZ_LATN',
+                name: 'O‘zbek jurnal',
+                description: 'O‘zbek tavsif',
+                contactText: null,
+              },
+              {
+                locale: 'RU',
+                name: 'Русский журнал',
+                description: 'Русское описание',
+                contactText: null,
+              },
+            ],
+            currentRequirement: {
+              id: '58be2910-4ed7-411e-be5a-d6c2fdb31dc1',
+              version: 2,
+              config: {},
+              localizations: [
+                {
+                  locale: 'UZ_LATN',
+                  title: 'O‘zbek talablar',
+                  summary: 'O‘zbek xulosa',
+                  body: 'O‘zbek matn',
+                  help: null,
+                  contact: null,
+                },
+                {
+                  locale: 'RU',
+                  title: 'Новые русские требования',
+                  summary: 'Новое русское резюме',
+                  body: 'Новый русский текст',
+                  help: null,
+                  contact: null,
+                },
+              ],
+            },
+          },
+        },
+      }),
+    } as unknown as BotApi;
+    const bot = createBot('123456:ABC-telegram-test-token', api);
+    const outgoing: { method: string; payload: unknown }[] = [];
+    bot.api.config.use((_previous, method, payload) => {
+      outgoing.push({ method, payload });
+      return Promise.resolve(
+        method === 'getMe'
+          ? {
+              ok: true,
+              result: { id: 123456, is_bot: true, first_name: 'HMQA', username: 'hmqa_test_bot' },
+            }
+          : {
+              ok: true,
+              result: { message_id: 1, date: 1_700_000_000, chat: { id: 100, type: 'private' } },
+            },
+      ) as never;
+    });
+    await bot.init();
+    outgoing.length = 0;
+
+    await bot.handleUpdate(update(9, '/start'));
+
+    const payloads = JSON.stringify(outgoing);
+    expect(payloads).toContain('Русские требования');
+    expect(payloads).toContain('Русское резюме');
+    expect(payloads).toContain('Русский журнал');
+    expect(payloads).not.toContain('O‘zbek talablar');
+    expect(payloads).not.toContain('Новые русские требования');
+  });
+
   it('starts with language selection and persists update completion through the API', async () => {
     const completeUpdate = vi.fn().mockResolvedValue(undefined);
     const api = {

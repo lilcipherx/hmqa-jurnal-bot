@@ -98,7 +98,7 @@ const hydratedDraftInclude = {
     orderBy: { createdAt: 'desc' },
   },
   preflightRuns: { orderBy: { createdAt: 'desc' } },
-  requirementVersion: true,
+  requirementVersion: { include: { localizations: true } },
   journal: {
     include: {
       localizations: true,
