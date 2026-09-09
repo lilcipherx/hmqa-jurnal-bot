@@ -6,6 +6,7 @@ const test = parse(readFileSync('docker-compose.test.yml', 'utf8'), { merge: tru
 const dockerfile = readFileSync('infrastructure/docker/Dockerfile', 'utf8');
 const backupDockerfile = readFileSync('infrastructure/docker/backup.Dockerfile', 'utf8');
 const restoreScript = readFileSync('infrastructure/backup/restore.sh', 'utf8');
+const hostNginx = readFileSync('infrastructure/nginx/hmqa-staging.conf', 'utf8');
 const requiredServices = [
   'postgres',
   'redis',
@@ -123,6 +124,19 @@ assert(
 assert(
   !/sha256sum --check/.test(restoreScript),
   'Restore checksums must not use GNU-only sha256sum options',
+);
+assert(/listen 443 ssl;/.test(hostNginx), 'Host nginx must terminate TLS');
+assert(
+  /ssl_protocols TLSv1\.2 TLSv1\.3;/.test(hostNginx),
+  'Host nginx must permit only TLS 1.2 and TLS 1.3',
+);
+assert(
+  /return 308 https:\/\/\$host\$request_uri;/.test(hostNginx),
+  'Host nginx must redirect HTTP to HTTPS',
+);
+assert(
+  /proxy_pass http:\/\/127\.0\.0\.1:8080;/.test(hostNginx),
+  'Host nginx must proxy only to the loopback-bound application gateway',
 );
 
 if (failures.length > 0) {

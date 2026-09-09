@@ -94,6 +94,15 @@ docker compose --env-file .env ps
 docker compose --env-file .env logs --tail=200 migrate api bot worker admin-web nginx
 ```
 
+For the canonical `hmqa.duckdns.org` single-host deployment, bind the Compose gateway to loopback with `HTTP_PORT=127.0.0.1:8080`. Install `infrastructure/nginx/hmqa-staging.conf` as the host nginx TLS virtual host after obtaining the certificate with the persistent `/var/www/letsencrypt` webroot. The public endpoints are:
+
+- admin: `https://hmqa.duckdns.org/` (`/admin` is a permanent redirect to `/`);
+- OpenAPI: `https://hmqa.duckdns.org/documentation` (`/api` redirects there);
+- API base: `https://hmqa.duckdns.org/api/v1`;
+- Telegram webhook: `https://hmqa.duckdns.org/telegram/webhook`.
+
+The host edge is the only public listener. PostgreSQL, Redis, MinIO, ClamAV, application ports, metrics, and the loopback application gateway must not be published externally.
+
 Do not run the development seed in staging unless the environment is explicitly disposable and Academy-approved synthetic fixtures are required. A real staging smoke/UAT and verified backup must still be recorded before promotion.
 
 Do not expose PostgreSQL, Redis, MinIO, ClamAV, worker, or internal API addresses publicly. The bundled Compose file publishes only nginx.
