@@ -19,13 +19,31 @@ test('admin session survives SSR, refresh, protected navigation, and is revoked 
   await page.locator('input[name="password"]').fill(password);
   await page.locator('input[name="totp"]').fill(generateTotpCode(totpSecret));
 
-  // Capture evidence while the login document still owns the response body.
-  // `window.location.assign` destroys that document immediately after the client
-  // consumes the JSON, and retaining only the Response can make CDP lose its body.
+  // Preserve only the JSON field names inside the browser before the application
+  // navigates. Chromium can release the response body as soon as
+  // `window.location.assign` destroys the login document, making a later CDP
+  // `response.json()` call inherently racy.
+  await page.evaluate(() => {
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args);
+      const input = args[0];
+      const rawUrl =
+        typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (new URL(rawUrl, window.location.href).pathname === '/api/auth/login') {
+        const body = (await response.clone().json()) as Record<string, unknown>;
+        window.sessionStorage.setItem(
+          'hmqa-auth-test-response-shape',
+          JSON.stringify(Object.keys(body).sort()),
+        );
+      }
+      return response;
+    };
+  });
+
   const loginEvidencePromise = page
     .waitForResponse((response) => new URL(response.url()).pathname === '/api/auth/login')
     .then(async (response) => ({
-      body: (await response.json()) as Record<string, unknown>,
       headers: await response.headersArray(),
       status: response.status(),
     }));
@@ -39,7 +57,10 @@ test('admin session survives SSR, refresh, protected navigation, and is revoked 
 
   const loginEvidence = await loginEvidencePromise;
   expect(loginEvidence.status).toBe(200);
-  const responseShape = Object.keys(loginEvidence.body).sort();
+  const responseShape = await page.evaluate(() => {
+    const stored = window.sessionStorage.getItem('hmqa-auth-test-response-shape');
+    return stored ? (JSON.parse(stored) as string[]) : null;
+  });
   expect(responseShape).toEqual(['csrfToken', 'expiresAt', 'sessionId']);
   const setCookies = loginEvidence.headers.filter(
     ({ name }) => name.toLowerCase() === 'set-cookie',
