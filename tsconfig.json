@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": { "noEmit": true, "rootDir": "." },
-  "include": ["tests/**/*.ts", "vitest*.ts"]
+  "include": ["tests/**/*.ts", "vitest*.ts", "playwright.config.ts"]
 }

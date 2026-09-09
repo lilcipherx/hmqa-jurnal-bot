@@ -28,7 +28,17 @@ COPY --from=build --chown=node:node /workspace /workspace
 USER node
 CMD ["pnpm", "--filter", "@hmqa/api", "start"]
 
+FROM verification AS browser-verification
+USER root
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN pnpm exec playwright install --with-deps chromium \
+  && chmod -R a+rX /ms-playwright
+USER node
+CMD ["pnpm", "test:browser"]
+
 FROM runtime-base AS runtime
+ARG DEPLOYED_SHA=development
+LABEL org.opencontainers.image.revision=$DEPLOYED_SHA
 COPY --from=build --chown=node:node /workspace/package.json /workspace/pnpm-lock.yaml /workspace/pnpm-workspace.yaml /workspace/.npmrc ./
 COPY --from=build --chown=node:node /workspace/node_modules ./node_modules
 

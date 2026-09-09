@@ -61,6 +61,21 @@ services:
       telegram-stub: { condition: service_healthy }
     networks: [backend]
 
+  browser-tests:
+    profiles: [runtime]
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile
+      target: browser-verification
+    env_file: ${ENV_FILE:-.env.test.example}
+    environment:
+      ADMIN_BROWSER_BASE_URL: http://nginx:8080
+    command: ['pnpm', 'test:browser']
+    shm_size: 1gb
+    depends_on:
+      nginx: { condition: service_started }
+    networks: [backend]
+
   backup:
     environment:
       RESTIC_REPOSITORY: /var/lib/hmqa/restic

@@ -96,13 +96,24 @@ for (const service of [
   'clamav-signature-init',
   'telegram-stub',
   'runtime-tests',
+  'browser-tests',
   'postgres-recovery',
   'minio-recovery',
 ]) {
   assert(Boolean(test?.services?.[service]), `Missing verification-only service: ${service}`);
 }
+for (const service of ['migrate', 'api', 'bot', 'worker', 'admin-web']) {
+  assert(
+    base.services[service]?.build?.args?.DEPLOYED_SHA,
+    `${service} image must carry the deployed Git revision build argument`,
+  );
+}
 assert(test.services['telegram-stub']?.build?.target === 'verification', 'Telegram fixture target');
 assert(test.services['runtime-tests']?.build?.target === 'verification', 'Runtime test target');
+assert(
+  test.services['browser-tests']?.build?.target === 'browser-verification',
+  'Browser test target',
+);
 assert(
   test.services['clamav-signature-init']?.volumes?.some((volume) =>
     String(volume).includes('tests/fixtures'),

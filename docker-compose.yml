@@ -4,6 +4,8 @@ x-app: &app
   build:
     context: .
     dockerfile: infrastructure/docker/Dockerfile
+    args:
+      DEPLOYED_SHA: ${DEPLOYED_SHA:-development}
   env_file: ${ENV_FILE:-.env}
   restart: unless-stopped
   networks: [backend]

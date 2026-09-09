@@ -2,6 +2,7 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": { "noEmit": true, "rootDir": "." },
   "include": [
+    "playwright.config.ts",
     "tests/**/*.ts",
     "apps/**/*.spec.ts",
     "apps/**/*.test.ts",

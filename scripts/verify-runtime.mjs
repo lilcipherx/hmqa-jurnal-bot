@@ -207,6 +207,10 @@ try {
     ['exec', '-T', 'nginx', 'wget', '--spider', '--quiet', 'http://127.0.0.1:8080/'],
     180_000,
   );
+  compose(['build', 'browser-tests'], { label: 'Build isolated Playwright Chromium runner' });
+  compose(['run', '--rm', '--no-deps', 'browser-tests'], {
+    label: 'Browser login, session persistence, protected navigation, and logout test',
+  });
   compose(
     [
       'run',
