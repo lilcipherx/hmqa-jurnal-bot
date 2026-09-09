@@ -9,8 +9,9 @@ export async function POST(request: Request) {
     cache: 'no-store',
     signal: AbortSignal.timeout(12_000),
   });
-  return new NextResponse(await response.text(), {
+  const body = await response.text();
+  return new NextResponse(body || null, {
     status: response.status,
-    headers: { 'content-type': 'application/json' },
+    ...(body ? { headers: { 'content-type': 'application/json' } } : {}),
   });
 }
