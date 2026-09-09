@@ -142,6 +142,13 @@ suite('end-to-end editorial and revision lifecycle', () => {
             maxTotalBytes: 2 * 1024 * 1024,
           },
           preflight: { docx: { rulesVersion: 'lifecycle-e2e-v1', requiredMarkers: [] } },
+          metadata: {
+            abstractMinWords: 5,
+            abstractMaxWords: 100,
+            keywordMinCount: 3,
+            keywordMaxCount: 10,
+            coauthorMaxCount: 10,
+          },
           workflow: {
             reviewModel: 'SINGLE_BLIND',
             requiredReviewerCount: 1,
