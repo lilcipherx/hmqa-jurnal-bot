@@ -24,6 +24,20 @@ async function scanner(response: string): Promise<number> {
   return address.port;
 }
 
+async function unavailablePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('TEST_SERVER_ADDRESS_MISSING');
+  await new Promise<void>((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
+  return address.port;
+}
+
 afterEach(async () => {
   await Promise.all(
     servers
@@ -52,6 +66,13 @@ describe('ClamAV INSTREAM protocol', () => {
       status: 'INFECTED',
       signature: 'Eicar-Signature',
       response: 'stream: Eicar-Signature FOUND',
+    });
+  });
+
+  it('rejects a connection failure without leaking an unhandled rejection', async () => {
+    const port = await unavailablePort();
+    await expect(scanFile('127.0.0.1', port, import.meta.filename, 2_000)).rejects.toMatchObject({
+      code: 'ECONNREFUSED',
     });
   });
 });

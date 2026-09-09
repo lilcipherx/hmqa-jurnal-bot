@@ -20,37 +20,71 @@ export async function scanFile(
   timeoutMs: number,
 ): Promise<ScanResult> {
   const socket = connect({ host, port });
-  socket.setTimeout(timeoutMs);
-  let response = '';
-  const result = new Promise<string>((resolve, reject) => {
-    socket.once('error', reject);
-    socket.once('timeout', () => {
-      socket.destroy();
-      reject(new Error('CLAMAV_TIMEOUT'));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        socket.destroy();
+        reject(new Error('CLAMAV_TIMEOUT'));
+      }, timeoutMs);
+      const cleanup = () => {
+        clearTimeout(timer);
+        socket.off('connect', onConnect);
+        socket.off('error', onError);
+      };
+      const onConnect = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+      socket.once('connect', onConnect);
+      socket.once('error', onError);
     });
-    socket.on('data', (chunk: Buffer) => {
-      response += chunk.toString('utf8');
+    socket.setTimeout(timeoutMs);
+    let response = '';
+    const result = new Promise<string>((resolve, reject) => {
+      let settled = false;
+      const finish = (action: () => void) => {
+        if (settled) return;
+        settled = true;
+        action();
+      };
+      socket.once('error', (error) => finish(() => reject(error)));
+      socket.once('timeout', () => {
+        finish(() => reject(new Error('CLAMAV_TIMEOUT')));
+        socket.destroy();
+      });
+      socket.on('data', (chunk: Buffer) => {
+        response += chunk.toString('utf8');
+      });
+      socket.once('end', () => finish(() => resolve(response.trim())));
+      socket.once('close', () =>
+        finish(() => reject(new Error('CLAMAV_CONNECTION_CLOSED_WITHOUT_RESPONSE'))),
+      );
     });
-    socket.once('end', () => resolve(response.trim()));
-  });
-  await new Promise<void>((resolve, reject) => {
-    socket.once('connect', resolve);
-    socket.once('error', reject);
-  });
-  socket.write('zINSTREAM\0');
-  const stream = createReadStream(path, { highWaterMark: 64 * 1024 }) as AsyncIterable<Buffer>;
-  for await (const chunk of stream) {
-    await writeChunk(socket, Buffer.from(chunk));
+    // A socket/write failure can reject both the write operation and the
+    // response promise. Attach a handler immediately so the latter never
+    // becomes an unhandled rejection while the write path is unwinding.
+    void result.catch(() => undefined);
+    socket.write('zINSTREAM\0');
+    const stream = createReadStream(path, { highWaterMark: 64 * 1024 }) as AsyncIterable<Buffer>;
+    for await (const chunk of stream) {
+      await writeChunk(socket, Buffer.from(chunk));
+    }
+    socket.end(Buffer.alloc(4));
+    // ClamAV's zero-terminated protocol includes the trailing NUL byte in the
+    // response. Normalise protocol framing before interpreting the status.
+    const message = (await result).replaceAll('\0', '').trim();
+    if (message.endsWith('OK')) return { status: 'CLEAN', response: message };
+    const found = message.match(/: (.+) FOUND$/);
+    if (found?.[1]) return { status: 'INFECTED', signature: found[1], response: message };
+    throw new Error(`CLAMAV_ERROR:${message.slice(0, 200)}`);
+  } finally {
+    socket.destroy();
   }
-  const terminator = Buffer.alloc(4);
-  await new Promise<void>((resolve) => socket.end(terminator, resolve));
-  // ClamAV's zero-terminated protocol includes the trailing NUL byte in the
-  // response. Normalise protocol framing before interpreting the status.
-  const message = (await result).replaceAll('\0', '').trim();
-  if (message.endsWith('OK')) return { status: 'CLEAN', response: message };
-  const found = message.match(/: (.+) FOUND$/);
-  if (found?.[1]) return { status: 'INFECTED', signature: found[1], response: message };
-  throw new Error(`CLAMAV_ERROR:${message.slice(0, 200)}`);
 }
 
 export async function pingClamAv(host: string, port: number, timeoutMs = 2_000): Promise<boolean> {
