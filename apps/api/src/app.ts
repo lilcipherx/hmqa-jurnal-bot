@@ -60,8 +60,28 @@ import { z } from 'zod';
 import * as Sentry from '@sentry/node';
 
 const loginSchema = z
-  .object({ email: z.email(), password: z.string().min(1), totp: z.string().regex(/^\d{6}$/) })
+  .object({
+    email: z.email(),
+    password: z.string().min(1).max(256),
+    totp: z.preprocess(
+      (value) => (value === '' ? undefined : value),
+      z
+        .string()
+        .regex(/^\d{6}$/)
+        .optional(),
+    ),
+  })
   .strict();
+
+const staffStepUpSchema = z
+  .object({
+    currentPassword: z.string().min(1).max(256),
+    currentTotp: z.string().regex(/^\d{6}$/),
+    confirmation: z.literal(true),
+  })
+  .strict();
+
+const totpEnrollmentTtlMs = 10 * 60_000;
 
 const submissionResultSchema = z.object({
   submissionId: z.uuid(),
@@ -341,6 +361,69 @@ export async function createApp({
     }
   }
 
+  async function verifyStaffStepUpCredentials(
+    employeeId: string,
+    currentPassword: string,
+    currentTotp: string,
+  ): Promise<boolean> {
+    const employee = await database.employee.findUnique({
+      where: { id: employeeId },
+      select: {
+        status: true,
+        passwordHash: true,
+        totpEnabled: true,
+        totpSecretCipher: true,
+      },
+    });
+    if (
+      !employee ||
+      employee.status !== 'ACTIVE' ||
+      !employee.passwordHash ||
+      !employee.totpEnabled ||
+      !employee.totpSecretCipher
+    )
+      return false;
+    const passwordOk = await verifyPassword(employee.passwordHash, currentPassword);
+    let totpOk = false;
+    try {
+      totpOk = verifyTotp(
+        decryptSecret(employee.totpSecretCipher, config.ENCRYPTION_KEY),
+        currentTotp,
+      );
+    } catch {
+      totpOk = false;
+    }
+    return passwordOk && totpOk;
+  }
+
+  async function rejectInvalidLogin(
+    employeeId: string,
+    request: FastifyRequest,
+    reply: FastifyReply,
+    recordFailure = true,
+  ) {
+    if (recordFailure)
+      await database.$transaction(async (tx) => {
+        const failed = await tx.employee.update({
+          where: { id: employeeId },
+          data: { failedLoginCount: { increment: 1 } },
+          select: { failedLoginCount: true },
+        });
+        if (failed.failedLoginCount >= 5) {
+          await tx.employee.update({
+            where: { id: employeeId },
+            data: { lockedUntil: new Date(Date.now() + 15 * 60_000) },
+          });
+        }
+      });
+    authDenied.inc({ reason: 'login' });
+    return reply.code(401).send({
+      code: 'INVALID_CREDENTIALS',
+      messageKey: 'error.forbidden',
+      correlationId: request.id,
+    });
+  }
+
   async function telegramUser(telegramUserId: string) {
     return database.user.findUnique({ where: { telegramUserId: BigInt(telegramUserId) } });
   }
@@ -454,6 +537,71 @@ export async function createApp({
     });
   }
 
+  async function resetStaffTotp(
+    request: FastifyRequest,
+    employeeId: string,
+    action: 'employee.totp.reset.self' | 'employee.totp.reset.admin',
+  ) {
+    const resetAt = new Date();
+    return serializableTransactionWithRetry(database, async (tx) => {
+      const before = await tx.employee.findUnique({
+        where: { id: employeeId },
+        select: {
+          id: true,
+          status: true,
+          totpEnabled: true,
+          totpResetRequiredAt: true,
+          roles: { select: { role: { select: { code: true } } } },
+        },
+      });
+      if (!before)
+        throw new BusinessRuleError('EMPLOYEE_NOT_FOUND', 'admin.security.employee_not_found');
+      if (!before.totpEnabled)
+        throw new BusinessRuleError('TOTP_RESET_ALREADY_PENDING', 'error.stale_action');
+
+      const reset = await tx.employee.updateMany({
+        where: { id: employeeId, status: 'ACTIVE', totpEnabled: true },
+        data: {
+          totpEnabled: false,
+          totpSecretCipher: null,
+          totpResetRequiredAt: resetAt,
+          failedLoginCount: 0,
+          lockedUntil: null,
+        },
+      });
+      if (reset.count !== 1)
+        throw new BusinessRuleError('TOTP_RESET_UNAVAILABLE', 'error.stale_action');
+
+      const revokedSessions = await tx.staffSession.updateMany({
+        where: { employeeId, revokedAt: null },
+        data: { revokedAt: resetAt },
+      });
+      await tx.staffTotpEnrollment.updateMany({
+        where: { employeeId, completedAt: null, revokedAt: null },
+        data: { revokedAt: resetAt, secretCipher: null },
+      });
+      await appendAudit(tx, request, {
+        action,
+        entity: 'Employee',
+        entityId: employeeId,
+        before: {
+          status: before.status,
+          totpEnabled: before.totpEnabled,
+          reEnrollmentRequired: Boolean(before.totpResetRequiredAt),
+          roles: before.roles.map((membership) => membership.role.code).sort(),
+        },
+        after: {
+          status: before.status,
+          totpEnabled: false,
+          reEnrollmentRequired: true,
+          sessionsRevoked: revokedSessions.count,
+          roles: before.roles.map((membership) => membership.role.code).sort(),
+        },
+      });
+      return { employeeId, reEnrollmentRequired: true, sessionsRevoked: revokedSessions.count };
+    });
+  }
+
   app.get('/health/live', { schema: { tags: ['Operations'] } }, () => ({
     status: 'ok',
     version: config.DEPLOYED_SHA,
@@ -499,6 +647,7 @@ export async function createApp({
         });
       const employee = await database.employee.findUnique({
         where: { email: parsed.data.email.toLowerCase() },
+        include: { roles: { include: { role: true } } },
       });
       const now = new Date();
       if (
@@ -516,52 +665,121 @@ export async function createApp({
       const passwordOk = employee.passwordHash
         ? await verifyPassword(employee.passwordHash, parsed.data.password)
         : false;
-      const totpOk =
-        employee.totpEnabled && employee.totpSecretCipher
-          ? verifyTotp(
-              decryptSecret(employee.totpSecretCipher, config.ENCRYPTION_KEY),
-              parsed.data.totp,
-            )
-          : false;
-      if (!passwordOk || !totpOk) {
-        await database.$transaction(async (tx) => {
-          const failed = await tx.employee.update({
+      if (!passwordOk) return rejectInvalidLogin(employee.id, request, reply);
+
+      if (!employee.totpEnabled && !employee.totpSecretCipher && employee.totpResetRequiredAt) {
+        const enrollmentToken = generateOpaqueToken();
+        const enrollmentSecret = generateTotpSecret();
+        const expiresAt = new Date(Date.now() + totpEnrollmentTtlMs);
+        const enrollmentStarted = await serializableTransactionWithRetry(database, async (tx) => {
+          await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT "id" FROM "employees" WHERE "id" = ${employee.id}::uuid FOR UPDATE
+          `;
+          const current = await tx.employee.findUnique({
             where: { id: employee.id },
-            data: { failedLoginCount: { increment: 1 } },
-            select: { failedLoginCount: true },
+            include: { roles: { include: { role: true } } },
           });
-          if (failed.failedLoginCount >= 5) {
-            await tx.employee.update({
-              where: { id: employee.id },
-              data: { lockedUntil: new Date(Date.now() + 15 * 60_000) },
-            });
-          }
+          if (
+            !current ||
+            current.status !== 'ACTIVE' ||
+            current.passwordHash !== employee.passwordHash ||
+            current.totpEnabled ||
+            current.totpSecretCipher ||
+            !current.totpResetRequiredAt
+          )
+            return false;
+          const role = rolePriority.find((candidate) =>
+            current.roles.some((membership) => membership.role.code === candidate),
+          );
+          await tx.staffTotpEnrollment.updateMany({
+            where: { employeeId: employee.id, completedAt: null, revokedAt: null },
+            data: { revokedAt: now, secretCipher: null },
+          });
+          const enrollment = await tx.staffTotpEnrollment.create({
+            data: {
+              employeeId: employee.id,
+              tokenHash: hashOpaqueToken(enrollmentToken),
+              secretCipher: encryptSecret(enrollmentSecret, config.ENCRYPTION_KEY),
+              expiresAt,
+            },
+          });
+          await tx.employee.update({
+            where: { id: employee.id },
+            data: { failedLoginCount: 0, lockedUntil: null },
+          });
+          await appendAudit(tx, request, {
+            action: 'employee.totp.enrollment.started',
+            entity: 'StaffTotpEnrollment',
+            entityId: enrollment.id,
+            actor: {
+              type: 'EMPLOYEE',
+              id: employee.id,
+              ...(role ? { role } : {}),
+            },
+            after: { employeeId: employee.id, expiresAt, reEnrollmentRequired: true },
+          });
+          return true;
         });
-        authDenied.inc({ reason: 'login' });
-        return reply.code(401).send({
-          code: 'INVALID_CREDENTIALS',
-          messageKey: 'error.forbidden',
+        if (!enrollmentStarted) return rejectInvalidLogin(employee.id, request, reply, false);
+        reply.setCookie('hmqa_totp_enrollment', enrollmentToken, {
+          httpOnly: true,
+          secure: config.NODE_ENV !== 'development' && config.NODE_ENV !== 'test',
+          sameSite: 'strict',
+          path: '/api/auth/totp',
+          maxAge: Math.floor(totpEnrollmentTtlMs / 1000),
+        });
+        return reply.code(428).send({
+          code: 'TOTP_ENROLLMENT_REQUIRED',
+          messageKey: 'admin.security.enrollment_required',
+          expiresAt: expiresAt.toISOString(),
           correlationId: request.id,
         });
       }
+
+      let totpOk = false;
+      if (employee.totpEnabled && employee.totpSecretCipher && parsed.data.totp) {
+        try {
+          totpOk = verifyTotp(
+            decryptSecret(employee.totpSecretCipher, config.ENCRYPTION_KEY),
+            parsed.data.totp,
+          );
+        } catch {
+          totpOk = false;
+        }
+      }
+      if (!totpOk) return rejectInvalidLogin(employee.id, request, reply);
       const token = generateOpaqueToken();
       const csrf = generateOpaqueToken();
-      const session = await database.staffSession.create({
-        data: {
-          employeeId: employee.id,
-          tokenHash: hashOpaqueToken(token),
-          csrfHash: hashOpaqueToken(csrf),
-          twoFactorAt: now,
-          stepUpUntil: new Date(Date.now() + 10 * 60_000),
-          expiresAt: new Date(Date.now() + config.SESSION_ABSOLUTE_HOURS * 60 * 60_000),
-          ipHash: hashOpaqueToken(request.ip),
-          userAgentHash: hashOpaqueToken(request.headers['user-agent'] ?? ''),
-        },
+      const session = await serializableTransactionWithRetry(database, async (tx) => {
+        const current = await tx.employee.findUnique({ where: { id: employee.id } });
+        if (
+          !current ||
+          current.status !== 'ACTIVE' ||
+          !current.totpEnabled ||
+          current.totpResetRequiredAt ||
+          current.passwordHash !== employee.passwordHash ||
+          current.totpSecretCipher !== employee.totpSecretCipher
+        )
+          return null;
+        const created = await tx.staffSession.create({
+          data: {
+            employeeId: employee.id,
+            tokenHash: hashOpaqueToken(token),
+            csrfHash: hashOpaqueToken(csrf),
+            twoFactorAt: now,
+            stepUpUntil: new Date(Date.now() + 10 * 60_000),
+            expiresAt: new Date(Date.now() + config.SESSION_ABSOLUTE_HOURS * 60 * 60_000),
+            ipHash: hashOpaqueToken(request.ip),
+            userAgentHash: hashOpaqueToken(request.headers['user-agent'] ?? ''),
+          },
+        });
+        await tx.employee.update({
+          where: { id: employee.id },
+          data: { failedLoginCount: 0, lockedUntil: null, lastLoginAt: now },
+        });
+        return created;
       });
-      await database.employee.update({
-        where: { id: employee.id },
-        data: { failedLoginCount: 0, lockedUntil: null, lastLoginAt: now },
-      });
+      if (!session) return rejectInvalidLogin(employee.id, request, reply, false);
       reply.setCookie('hmqa_session', token, {
         httpOnly: true,
         secure: config.NODE_ENV !== 'development' && config.NODE_ENV !== 'test',
@@ -570,6 +788,311 @@ export async function createApp({
         maxAge: config.SESSION_ABSOLUTE_HOURS * 60 * 60,
       });
       return { sessionId: session.id, csrfToken: csrf, expiresAt: session.expiresAt.toISOString() };
+    },
+  );
+
+  app.get(
+    '/api/v1/auth/totp/enrollment',
+    {
+      config: { rateLimit: { max: 20, timeWindow: '15 minutes' } },
+      schema: { tags: ['Authentication'] },
+    },
+    async (request, reply) => {
+      const token = request.cookies.hmqa_totp_enrollment;
+      const enrollment = token
+        ? await database.staffTotpEnrollment.findUnique({
+            where: { tokenHash: hashOpaqueToken(token) },
+            include: {
+              employee: {
+                select: {
+                  email: true,
+                  displayName: true,
+                  status: true,
+                  totpEnabled: true,
+                  totpSecretCipher: true,
+                  totpResetRequiredAt: true,
+                },
+              },
+            },
+          })
+        : null;
+      if (
+        !enrollment ||
+        enrollment.completedAt ||
+        enrollment.revokedAt ||
+        !enrollment.secretCipher ||
+        enrollment.expiresAt <= new Date() ||
+        enrollment.employee.status !== 'ACTIVE' ||
+        enrollment.employee.totpEnabled ||
+        enrollment.employee.totpSecretCipher ||
+        !enrollment.employee.totpResetRequiredAt
+      ) {
+        if (enrollment?.secretCipher && !enrollment.completedAt)
+          await database.staffTotpEnrollment.updateMany({
+            where: { id: enrollment.id, completedAt: null },
+            data: { revokedAt: enrollment.revokedAt ?? new Date(), secretCipher: null },
+          });
+        reply.clearCookie('hmqa_totp_enrollment', {
+          httpOnly: true,
+          secure: config.NODE_ENV !== 'development' && config.NODE_ENV !== 'test',
+          sameSite: 'strict',
+          path: '/api/auth/totp',
+        });
+        return reply.code(404).send({
+          code: 'TOTP_ENROLLMENT_INVALID',
+          messageKey: 'admin.security.enrollment_expired',
+          correlationId: request.id,
+        });
+      }
+      const secret = decryptSecret(enrollment.secretCipher, config.ENCRYPTION_KEY);
+      reply.header('cache-control', 'no-store');
+      reply.header('pragma', 'no-cache');
+      return {
+        email: enrollment.employee.email,
+        displayName: enrollment.employee.displayName,
+        totpSecret: secret,
+        otpauthUrl: `otpauth://totp/${encodeURIComponent(`HMQA:${enrollment.employee.email}`)}?secret=${encodeURIComponent(secret)}&issuer=HMQA`,
+        expiresAt: enrollment.expiresAt.toISOString(),
+      };
+    },
+  );
+
+  app.post(
+    '/api/v1/auth/totp/enrollment/complete',
+    {
+      config: { rateLimit: { max: 8, timeWindow: '15 minutes' } },
+      schema: { tags: ['Authentication'] },
+    },
+    async (request, reply) => {
+      if (request.headers.origin !== config.ADMIN_BASE_URL)
+        return reply.code(403).send({
+          code: 'ORIGIN_INVALID',
+          messageKey: 'error.forbidden',
+          correlationId: request.id,
+        });
+      const body = z
+        .object({ totp: z.string().regex(/^\d{6}$/) })
+        .strict()
+        .parse(request.body);
+      const enrollmentToken = request.cookies.hmqa_totp_enrollment;
+      const enrollment = enrollmentToken
+        ? await database.staffTotpEnrollment.findUnique({
+            where: { tokenHash: hashOpaqueToken(enrollmentToken) },
+            include: {
+              employee: { include: { roles: { include: { role: true } } } },
+            },
+          })
+        : null;
+      const now = new Date();
+      if (
+        !enrollment ||
+        enrollment.completedAt ||
+        enrollment.revokedAt ||
+        !enrollment.secretCipher ||
+        enrollment.expiresAt <= now ||
+        enrollment.employee.status !== 'ACTIVE' ||
+        enrollment.employee.totpEnabled ||
+        !enrollment.employee.totpResetRequiredAt
+      ) {
+        if (enrollment?.secretCipher && !enrollment.completedAt)
+          await database.staffTotpEnrollment.updateMany({
+            where: { id: enrollment.id, completedAt: null },
+            data: { revokedAt: enrollment.revokedAt ?? now, secretCipher: null },
+          });
+        reply.clearCookie('hmqa_totp_enrollment', {
+          httpOnly: true,
+          secure: config.NODE_ENV !== 'development' && config.NODE_ENV !== 'test',
+          sameSite: 'strict',
+          path: '/api/auth/totp',
+        });
+        return reply.code(404).send({
+          code: 'TOTP_ENROLLMENT_INVALID',
+          messageKey: 'admin.security.enrollment_expired',
+          correlationId: request.id,
+        });
+      }
+      const enrollmentSecretCipher = enrollment.secretCipher;
+      const enrollmentSecret = decryptSecret(enrollmentSecretCipher, config.ENCRYPTION_KEY);
+      if (!verifyTotp(enrollmentSecret, body.totp))
+        return reply.code(422).send({
+          code: 'TOTP_INVALID',
+          messageKey: 'admin.security.invalid_credentials',
+          correlationId: request.id,
+        });
+
+      const sessionToken = generateOpaqueToken();
+      const csrf = generateOpaqueToken();
+      const expiresAt = new Date(Date.now() + config.SESSION_ABSOLUTE_HOURS * 60 * 60_000);
+      const role = rolePriority.find((candidate) =>
+        enrollment.employee.roles.some((membership) => membership.role.code === candidate),
+      );
+      const session = await serializableTransactionWithRetry(database, async (tx) => {
+        const claimed = await tx.staffTotpEnrollment.updateMany({
+          where: {
+            id: enrollment.id,
+            completedAt: null,
+            revokedAt: null,
+            expiresAt: { gt: now },
+          },
+          data: { completedAt: now, secretCipher: null },
+        });
+        if (claimed.count !== 1)
+          throw new BusinessRuleError('TOTP_ENROLLMENT_STALE', 'admin.security.enrollment_expired');
+        const activated = await tx.employee.updateMany({
+          where: {
+            id: enrollment.employeeId,
+            status: 'ACTIVE',
+            totpEnabled: false,
+            totpResetRequiredAt: { not: null },
+          },
+          data: {
+            totpSecretCipher: enrollmentSecretCipher,
+            totpEnabled: true,
+            totpResetRequiredAt: null,
+            failedLoginCount: 0,
+            lockedUntil: null,
+            lastLoginAt: now,
+          },
+        });
+        if (activated.count !== 1)
+          throw new BusinessRuleError('TOTP_ENROLLMENT_STALE', 'admin.security.enrollment_expired');
+        await tx.staffSession.updateMany({
+          where: { employeeId: enrollment.employeeId, revokedAt: null },
+          data: { revokedAt: now },
+        });
+        await tx.staffTotpEnrollment.updateMany({
+          where: {
+            employeeId: enrollment.employeeId,
+            id: { not: enrollment.id },
+            completedAt: null,
+            revokedAt: null,
+          },
+          data: { revokedAt: now, secretCipher: null },
+        });
+        const created = await tx.staffSession.create({
+          data: {
+            employeeId: enrollment.employeeId,
+            tokenHash: hashOpaqueToken(sessionToken),
+            csrfHash: hashOpaqueToken(csrf),
+            twoFactorAt: now,
+            stepUpUntil: new Date(Date.now() + 10 * 60_000),
+            expiresAt,
+            ipHash: hashOpaqueToken(request.ip),
+            userAgentHash: hashOpaqueToken(request.headers['user-agent'] ?? ''),
+          },
+        });
+        await appendAudit(tx, request, {
+          action: 'employee.totp.enrolled',
+          entity: 'Employee',
+          entityId: enrollment.employeeId,
+          actor: {
+            type: 'EMPLOYEE',
+            id: enrollment.employeeId,
+            ...(role ? { role } : {}),
+          },
+          before: { totpEnabled: false, reEnrollmentRequired: true },
+          after: { totpEnabled: true, reEnrollmentRequired: false },
+        });
+        return created;
+      });
+
+      reply.clearCookie('hmqa_totp_enrollment', {
+        httpOnly: true,
+        secure: config.NODE_ENV !== 'development' && config.NODE_ENV !== 'test',
+        sameSite: 'strict',
+        path: '/api/auth/totp',
+      });
+      reply.setCookie('hmqa_session', sessionToken, {
+        httpOnly: true,
+        secure: config.NODE_ENV !== 'development' && config.NODE_ENV !== 'test',
+        sameSite: 'strict',
+        path: '/',
+        maxAge: config.SESSION_ABSOLUTE_HOURS * 60 * 60,
+      });
+      return {
+        sessionId: session.id,
+        csrfToken: csrf,
+        expiresAt: session.expiresAt.toISOString(),
+      };
+    },
+  );
+
+  app.post(
+    '/api/v1/auth/password/change',
+    {
+      preHandler: [authenticateStaff, verifyCsrf],
+      config: { rateLimit: { max: 5, timeWindow: '15 minutes' } },
+      schema: { tags: ['Authentication'], security: [{ staffCookie: [] }] },
+    },
+    async (request, reply) => {
+      const body = staffStepUpSchema
+        .extend({ newPassword: z.string().min(14).max(256) })
+        .parse(request.body);
+      if (
+        !(await verifyStaffStepUpCredentials(
+          request.actor!.id,
+          body.currentPassword,
+          body.currentTotp,
+        ))
+      ) {
+        authDenied.inc({ reason: 'step_up' });
+        return reply.code(403).send({
+          code: 'STEP_UP_AUTH_FAILED',
+          messageKey: 'admin.security.invalid_credentials',
+          correlationId: request.id,
+        });
+      }
+      if (body.currentPassword === body.newPassword)
+        return reply.code(422).send({
+          code: 'PASSWORD_UNCHANGED',
+          messageKey: 'admin.security.password_unchanged',
+          correlationId: request.id,
+        });
+      const passwordHash = await hashPassword(body.newPassword);
+      await serializableTransactionWithRetry(database, async (tx) => {
+        await tx.employee.update({
+          where: { id: request.actor!.id },
+          data: { passwordHash, failedLoginCount: 0, lockedUntil: null },
+        });
+        const revoked = await tx.staffSession.updateMany({
+          where: { employeeId: request.actor!.id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        await appendAudit(tx, request, {
+          action: 'employee.password.changed',
+          entity: 'Employee',
+          entityId: request.actor!.id,
+          after: { passwordChanged: true, sessionsRevoked: revoked.count },
+        });
+      });
+      return reply.code(204).send();
+    },
+  );
+
+  app.post(
+    '/api/v1/auth/totp/reset',
+    {
+      preHandler: [authenticateStaff, verifyCsrf],
+      config: { rateLimit: { max: 5, timeWindow: '15 minutes' } },
+      schema: { tags: ['Authentication'], security: [{ staffCookie: [] }] },
+    },
+    async (request, reply) => {
+      const body = staffStepUpSchema.parse(request.body);
+      if (
+        !(await verifyStaffStepUpCredentials(
+          request.actor!.id,
+          body.currentPassword,
+          body.currentTotp,
+        ))
+      ) {
+        authDenied.inc({ reason: 'step_up' });
+        return reply.code(403).send({
+          code: 'STEP_UP_AUTH_FAILED',
+          messageKey: 'admin.security.invalid_credentials',
+          correlationId: request.id,
+        });
+      }
+      return resetStaffTotp(request, request.actor!.id, 'employee.totp.reset.self');
     },
   );
 
@@ -762,10 +1285,20 @@ export async function createApp({
       const actor = request.actor!;
       const employee = await database.employee.findUniqueOrThrow({
         where: { id: actor.id },
-        select: { id: true, email: true, displayName: true },
+        select: {
+          id: true,
+          email: true,
+          displayName: true,
+          totpEnabled: true,
+          totpResetRequiredAt: true,
+        },
       });
       return {
-        ...employee,
+        id: employee.id,
+        email: employee.email,
+        displayName: employee.displayName,
+        totpEnabled: employee.totpEnabled,
+        totpReEnrollmentRequired: Boolean(employee.totpResetRequiredAt),
         role: actor.role,
         permissions: permissionsFor(actor.role),
         journalIds: [...actor.journalIds],
@@ -4179,6 +4712,42 @@ export async function createApp({
         return employee;
       });
       return reply.code(201).send({ ...result, invitationToken, expiresAt });
+    },
+  );
+
+  app.post(
+    '/api/v1/admin/employees/:id/totp/reset',
+    {
+      preHandler: [authenticateStaff, verifyCsrf],
+      config: { rateLimit: { max: 5, timeWindow: '15 minutes' } },
+      schema: { tags: ['Users'], security: [{ staffCookie: [] }] },
+    },
+    async (request, reply) => {
+      const actor = request.actor!;
+      requirePermission(actor, 'user:manage');
+      if (actor.role !== 'ADMIN')
+        return reply.code(403).send({
+          code: 'FORBIDDEN',
+          messageKey: 'error.forbidden',
+          correlationId: request.id,
+        });
+      const employeeId = z.uuid().parse((request.params as { id: string }).id);
+      if (employeeId === actor.id)
+        return reply.code(409).send({
+          code: 'SELF_TOTP_RESET_USE_SETTINGS',
+          messageKey: 'admin.security.use_self_service',
+          correlationId: request.id,
+        });
+      const body = staffStepUpSchema.parse(request.body);
+      if (!(await verifyStaffStepUpCredentials(actor.id, body.currentPassword, body.currentTotp))) {
+        authDenied.inc({ reason: 'step_up' });
+        return reply.code(403).send({
+          code: 'STEP_UP_AUTH_FAILED',
+          messageKey: 'admin.security.invalid_credentials',
+          correlationId: request.id,
+        });
+      }
+      return resetStaffTotp(request, employeeId, 'employee.totp.reset.admin');
     },
   );
 

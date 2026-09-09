@@ -112,4 +112,46 @@ describe('admin login BFF', () => {
     expect(csrfCookie).toMatch(/HttpOnly/i);
     expect(csrfCookie).toMatch(/SameSite=Strict/i);
   });
+
+  it('forwards the protected enrollment cookie without creating a session CSRF cookie', async () => {
+    vi.stubEnv('API_INTERNAL_URL', 'http://api.test:3001');
+    const upstreamHeaders = new Headers({ 'content-type': 'application/json' });
+    upstreamHeaders.append(
+      'set-cookie',
+      'hmqa_totp_enrollment=test-enrollment; Max-Age=600; Path=/api/auth/totp; HttpOnly; Secure; SameSite=Strict',
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              code: 'TOTP_ENROLLMENT_REQUIRED',
+              messageKey: 'admin.security.enrollment_required',
+            }),
+            { status: 428, headers: upstreamHeaders },
+          ),
+        ),
+      ),
+    );
+
+    const response = await POST(
+      new Request('https://admin.test/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-proto': 'https' },
+        body: JSON.stringify({
+          email: 'admin@example.invalid',
+          password: 'test-password',
+          totp: '',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(428);
+    const cookies = response.headers.getSetCookie();
+    expect(cookies).toHaveLength(1);
+    expect(cookies[0]).toMatch(/^hmqa_totp_enrollment=/);
+    expect(cookies[0]).toMatch(/Path=\/api\/auth\/totp/i);
+    expect(cookies.some((value) => value.startsWith('hmqa_csrf='))).toBe(false);
+  });
 });

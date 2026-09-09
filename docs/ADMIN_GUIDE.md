@@ -14,6 +14,14 @@ The command interactively asks for the approved email and display name, creates 
 
 Staff accounts are invitation-only. The one-time invitation expires after 24 hours and displays the TOTP enrollment secret only to the invitee. A password must contain at least 14 characters. Five failed logins trigger a 15-minute lock. Sessions have idle and absolute expiry; sensitive decisions require a recent TOTP-backed step-up window.
 
+### Password and TOTP maintenance
+
+Use Settings → Security to change your own password or reset and re-enroll TOTP. Enter the current password and current authenticator code, submit once to review the warning, then explicitly confirm. A successful password change or TOTP reset signs the account out on every device.
+
+An `ADMIN` can use Users → Reset 2FA for another active staff member. The administrator must enter their own current password and TOTP and confirm twice. The action invalidates the target's old seed and all target sessions; it does not reveal a replacement seed to the administrator. At the target's next login, they enter the correct password without a TOTP code, enroll the newly displayed seed in their authenticator, and prove possession with a generated code. The enrollment challenge expires after ten minutes.
+
+Do not treat Reset 2FA as a way to run an account without 2FA. There is no normal permanent-disable flow, including for `ADMIN` and `CHIEF_EDITOR`. If the only administrator loses both password and authenticator access, follow the Academy credential-recovery incident procedure; do not create an untracked administrator or edit credential fields manually.
+
 The backend, not the visibility of a button, enforces permissions and journal scope:
 
 - `OPERATOR`: technical review, assignment assistance, scoped files, and notification replay;

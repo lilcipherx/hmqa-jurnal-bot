@@ -281,6 +281,24 @@ td {
   flex-wrap: wrap;
   gap: 0.75rem;
 }
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.inline-security-form {
+  display: grid;
+  gap: 0.75rem;
+  min-width: min(24rem, 75vw);
+  padding: 0.75rem;
+  border-radius: 0.65rem;
+  background: var(--surface);
+  box-shadow: var(--shadow-border);
+}
+.security-settings {
+  margin-top: 1.5rem;
+}
 .check-row {
   display: flex;
   align-items: center;

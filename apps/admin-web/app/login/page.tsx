@@ -16,6 +16,7 @@ export default async function LoginPage() {
             email: translate(locale, 'admin.auth.email'),
             password: translate(locale, 'admin.auth.password'),
             totp: translate(locale, 'admin.auth.two_factor'),
+            totpHint: translate(locale, 'admin.auth.two_factor_reenrollment_hint'),
             submit: translate(locale, 'admin.auth.sign_in'),
             invalid: translate(locale, 'admin.auth.invalid'),
           }}

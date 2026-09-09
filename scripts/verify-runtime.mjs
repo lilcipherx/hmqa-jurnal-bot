@@ -221,7 +221,10 @@ try {
   );
   compose(['build', 'browser-tests'], { label: 'Build isolated Playwright Chromium runner' });
   compose(['run', '--rm', '--no-deps', 'browser-tests'], {
-    label: 'Browser login, session persistence, protected navigation, and logout test',
+    label: 'Browser authentication, TOTP management, protected navigation, and logout test',
+  });
+  compose(['run', '--rm', 'runtime-tests', 'pnpm', 'db:seed'], {
+    label: 'Restore deterministic synthetic staff credentials after browser security tests',
   });
   compose(
     [

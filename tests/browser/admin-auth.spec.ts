@@ -6,7 +6,7 @@ const email = process.env.SEED_ADMIN_EMAIL;
 const password = process.env.SEED_ADMIN_PASSWORD;
 const totpSecret = process.env.SEED_STAFF_TOTP_SECRET;
 
-test('admin session survives SSR, refresh, protected navigation, and is revoked on logout', async ({
+test('admin auth, protected navigation, staff reset, self re-enrollment, and logout', async ({
   page,
 }) => {
   if (!email || !password || !totpSecret) {
@@ -100,6 +100,70 @@ test('admin session survives SSR, refresh, protected navigation, and is revoked 
   await page.locator('a[href="/settings"]').click();
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.locator('.app-shell')).toBeVisible();
+  await expect(page.getByTestId('change-password-form')).toBeVisible();
+  await expect(page.getByTestId('self-totp-reset-form')).toBeVisible();
+
+  const passwordForm = page.getByTestId('change-password-form');
+  await passwordForm.locator('input[name="currentPassword"]').fill(password);
+  await passwordForm.locator('input[name="currentTotp"]').fill(generateTotpCode(totpSecret));
+  await passwordForm.locator('input[name="newPassword"]').fill('Browser-new-password-2026!');
+  await passwordForm
+    .locator('input[name="confirmPassword"]')
+    .fill('Browser-different-password-2026!');
+  await passwordForm.locator('button[type="submit"]').click();
+  await expect(passwordForm.locator('[role="alert"]')).toBeVisible();
+
+  await page.locator('a[href="/users"]').click();
+  await expect(page).toHaveURL(/\/users$/);
+  const operatorRow = page.locator('tr', { hasText: 'operator@example.invalid' });
+  await expect(operatorRow).toBeVisible();
+  await operatorRow.locator('[data-testid^="reset-totp-"]').click();
+  const staffResetForm = operatorRow.locator('[data-testid^="reset-totp-form-"]');
+  await staffResetForm.locator('input[name="currentPassword"]').fill(password);
+  await staffResetForm.locator('input[name="currentTotp"]').fill(generateTotpCode(totpSecret));
+  await staffResetForm.locator('button[type="submit"]').click();
+  await expect(staffResetForm.locator('[role="status"]')).toBeVisible();
+  const staffResetResponsePromise = page.waitForResponse((response) =>
+    /\/api\/employees\/[^/]+\/totp\/reset$/.test(new URL(response.url()).pathname),
+  );
+  await staffResetForm.locator('button[type="submit"]').click();
+  expect((await staffResetResponsePromise).status()).toBe(200);
+  await expect(page.locator('tr', { hasText: 'operator@example.invalid' })).toBeVisible();
+
+  await page.locator('a[href="/settings"]').click();
+  const resetForm = page.getByTestId('self-totp-reset-form');
+  await resetForm.locator('input[name="currentPassword"]').fill(password);
+  await resetForm.locator('input[name="currentTotp"]').fill(generateTotpCode(totpSecret));
+  await resetForm.locator('button[type="submit"]').click();
+  await expect(resetForm.locator('[role="status"]')).toBeVisible();
+  const resetResponsePromise = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/auth/totp/reset',
+  );
+  await resetForm.locator('button[type="submit"]').click();
+  expect((await resetResponsePromise).status()).toBe(200);
+  await expect(page).toHaveURL(/\/login$/);
+  expect((await page.request.get('/api/v1/auth/me')).status()).toBe(401);
+
+  await page.locator('input[name="email"]').fill(email);
+  await page.locator('input[name="password"]').fill(password);
+  const enrollmentLoginPromise = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/auth/login',
+  );
+  await page.locator('button[type="submit"]').click();
+  expect((await enrollmentLoginPromise).status()).toBe(428);
+  await expect(page).toHaveURL(/\/security\/totp-enroll$/);
+  const newSecret = await page.getByTestId('totp-enrollment-secret').textContent();
+  expect(newSecret).toBeTruthy();
+  expect(newSecret).not.toBe(totpSecret);
+  await page.locator('input[name="totp"]').fill(generateTotpCode(newSecret!));
+  const enrollmentResponsePromise = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/auth/totp/enrollment/complete',
+  );
+  await page.locator('button[type="submit"]').click();
+  expect((await enrollmentResponsePromise).status()).toBe(200);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.locator('.app-shell')).toBeVisible();
+  expect((await page.request.get('/api/v1/auth/me')).status()).toBe(200);
 
   const logoutResponsePromise = page.waitForResponse(
     (response) => new URL(response.url()).pathname === '/api/auth/logout',

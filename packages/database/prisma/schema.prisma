@@ -583,6 +583,7 @@ model Employee {
   passwordHash         String?                @map("password_hash")
   totpSecretCipher     String?                @map("totp_secret_cipher")
   totpEnabled          Boolean                @default(false) @map("totp_enabled")
+  totpResetRequiredAt  DateTime?              @map("totp_reset_required_at") @db.Timestamptz(6)
   status               EmployeeStatus         @default(INVITED)
   failedLoginCount     Int                    @default(0) @map("failed_login_count")
   lockedUntil          DateTime?              @map("locked_until") @db.Timestamptz(6)
@@ -593,6 +594,7 @@ model Employee {
   roles                EmployeeRole[]
   journalScopes        EmployeeJournalScope[]
   sessions             StaffSession[]
+  totpEnrollments      StaffTotpEnrollment[]
   assignments          Assignment[]
   reviewerProfile      ReviewerProfile?
   decisionsPrepared    DecisionProposal[]     @relation("DecisionPreparedBy")
@@ -682,6 +684,21 @@ model StaffSession {
 
   @@index([employeeId, revokedAt, expiresAt])
   @@map("staff_sessions")
+}
+
+model StaffTotpEnrollment {
+  id           String    @id @default(uuid()) @db.Uuid
+  employeeId   String    @map("employee_id") @db.Uuid
+  tokenHash    String    @unique @map("token_hash") @db.Char(64)
+  secretCipher String?   @map("secret_cipher")
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  completedAt  DateTime? @map("completed_at") @db.Timestamptz(6)
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, completedAt, revokedAt, expiresAt])
+  @@map("staff_totp_enrollments")
 }
 
 model StaffInvitation {

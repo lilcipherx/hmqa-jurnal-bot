@@ -9,6 +9,7 @@ Sensitive fields include author contact data, manuscripts, review identities/com
 ## Implemented controls
 
 - Argon2id passwords, mandatory TOTP enrollment, brute-force lockout, opaque hashed sessions, idle/absolute expiry, Secure HttpOnly SameSite cookies, and short decision step-up;
+- step-up-protected staff password changes and TOTP resets; a reset atomically removes the old encrypted seed, revokes every active session and pending challenge, audits only non-secret state, and forces a short-lived persistent re-enrollment flow before access is restored;
 - CSRF token plus exact-origin validation for every browser mutation; restrictive CORS, CSP, security headers, body limits, and API/nginx rate limiting;
 - compile-time role/permission matrix plus journal scope, assignment/ownership, workflow guard, optimistic concurrency, and four-eyes checks on the backend;
 - Telegram webhook secret checked in constant time, update envelope validated before grammY dispatch, and update IDs held with recoverable idempotency leases;
@@ -26,6 +27,12 @@ Sensitive fields include author contact data, manuscripts, review identities/com
 Rotate service/webhook/session/S3/backup credentials independently. Rotating `ENCRYPTION_KEY` requires a versioned re-encryption migration because ciphertext carries a format version but currently uses one configured key. Revoke all staff sessions after session-secret compromise. Update the BotFather webhook secret and deployment atomically.
 
 Never put production secrets in Git, images, Compose YAML, seed data, issue comments, or ordinary logs. The bundled MinIO service requires a deployment-specific KMS secret through `MINIO_KMS_SECRET_KEY`; it must be escrowed and rotated under the Academy's key-management procedure.
+
+## Staff credential recovery
+
+Use Settings → Security for a staff member's own password change or TOTP reset. Both actions require the current password, current TOTP, CSRF/origin validation, and a second confirmation. An administrator can reset another staff member from Users only after entering the administrator's own password and current TOTP. The target is immediately signed out everywhere.
+
+TOTP reset is not TOTP disablement. The affected account remains inaccessible until a new seed is enrolled at the next password-authenticated login. The enrollment cookie is opaque, HttpOnly, Secure in non-development environments, SameSite=Strict, scoped to `/api/auth/totp`, and expires after ten minutes. Challenges and seeds are encrypted or hashed at rest as appropriate and are never written to application logs or audit snapshots. See ADR 0008.
 
 ## Residual and external controls
 

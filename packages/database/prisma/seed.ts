@@ -173,6 +173,7 @@ async function seedPeople() {
         passwordHash,
         totpSecretCipher: encryptSecret(totpSecret, encryptionKey),
         totpEnabled: true,
+        totpResetRequiredAt: null,
       },
       create: {
         email,

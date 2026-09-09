@@ -31,6 +31,8 @@ export interface CurrentEmployee {
   role: string;
   permissions: string[];
   journalIds: string[];
+  totpEnabled: boolean;
+  totpReEnrollmentRequired: boolean;
 }
 
 export function internalApiUrl(path: string): URL {

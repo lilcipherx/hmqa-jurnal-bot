@@ -5,7 +5,14 @@ import { useEffect, useState, type FormEvent } from 'react';
 export function LoginForm({
   labels,
 }: {
-  labels: { email: string; password: string; totp: string; submit: string; invalid: string };
+  labels: {
+    email: string;
+    password: string;
+    totp: string;
+    totpHint: string;
+    submit: string;
+    invalid: string;
+  };
 }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -25,7 +32,14 @@ export function LoginForm({
         totp: form.get('totp'),
       }),
     });
-    const body = (await response.json().catch(() => null)) as { csrfToken?: string } | null;
+    const body = (await response.json().catch(() => null)) as {
+      code?: string;
+      csrfToken?: string;
+    } | null;
+    if (response.status === 428 && body?.code === 'TOTP_ENROLLMENT_REQUIRED') {
+      window.location.assign('/security/totp-enroll');
+      return;
+    }
     if (!response.ok || !body?.csrfToken) {
       setError(labels.invalid);
       setBusy(false);
@@ -71,8 +85,8 @@ export function LoginForm({
           pattern="[0-9]{6}"
           maxLength={6}
           autoComplete="one-time-code"
-          required
         />
+        <small>{labels.totpHint}</small>
       </label>
       <div role="alert" className={error ? 'error' : 'sr-only'}>
         {error}

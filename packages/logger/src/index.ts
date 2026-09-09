@@ -1,4 +1,4 @@
-import pino, { type LoggerOptions } from 'pino';
+import pino, { type DestinationStream, type LoggerOptions } from 'pino';
 
 const redactPaths = [
   'req.headers.authorization',
@@ -9,6 +9,24 @@ const redactPaths = [
   '*.token',
   'password',
   '*.password',
+  'currentPassword',
+  '*.currentPassword',
+  'newPassword',
+  '*.newPassword',
+  'totp',
+  '*.totp',
+  'currentTotp',
+  '*.currentTotp',
+  'totpSecret',
+  '*.totpSecret',
+  'totpSecretCipher',
+  '*.totpSecretCipher',
+  'csrfToken',
+  '*.csrfToken',
+  'sessionToken',
+  '*.sessionToken',
+  'enrollmentToken',
+  '*.enrollmentToken',
   'secret',
   '*.secret',
   'email',
@@ -40,19 +58,23 @@ export function createLogger(
   environment: string,
   level = 'info',
   options: LoggerOptions = {},
+  destination?: DestinationStream,
 ) {
-  return pino({
-    ...options,
-    name: service,
-    level,
-    base: { service, environment },
-    redact: { paths: redactPaths, censor: '[REDACTED]' },
-    serializers: {
-      ...options.serializers,
-      req: serializeHttpRequest,
-      res: serializeHttpResponse,
-      err: pino.stdSerializers.err,
+  return pino(
+    {
+      ...options,
+      name: service,
+      level,
+      base: { service, environment },
+      redact: { paths: redactPaths, censor: '[REDACTED]' },
+      serializers: {
+        ...options.serializers,
+        req: serializeHttpRequest,
+        res: serializeHttpResponse,
+        err: pino.stdSerializers.err,
+      },
+      timestamp: pino.stdTimeFunctions.isoTime,
     },
-    timestamp: pino.stdTimeFunctions.isoTime,
-  });
+    destination,
+  );
 }
