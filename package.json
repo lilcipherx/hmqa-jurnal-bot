@@ -34,18 +34,18 @@
     "compose:validate": "node scripts/validate-compose.mjs"
   },
   "devDependencies": {
-    "@eslint/js": "^9.35.0",
+    "@eslint/js": "^10.0.1",
     "@hmqa/config": "workspace:*",
     "@hmqa/database": "workspace:*",
     "@hmqa/security": "workspace:*",
-    "@types/node": "^24.3.1",
-    "eslint": "^9.35.0",
+    "@types/node": "^26.4.1",
+    "eslint": "^10.10.0",
     "ioredis": "^5.7.0",
     "prettier": "^3.6.2",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.2",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.42.0",
-    "vitest": "^4.1.11",
+    "vitest": "^5.0.0",
     "yaml": "2.9.0"
   }
 }
