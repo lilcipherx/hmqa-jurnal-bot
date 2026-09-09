@@ -18,6 +18,7 @@ Sensitive fields include author contact data, manuscripts, review identities/com
 - serializable workflow transaction writes status, history, notification outbox, and hash-chained audit together;
 - notification claim leases, deterministic queue IDs, exponential retry, terminal dead-letter state, and audited replay generations;
 - Sentry configured without default PII, Prometheus metrics, health probes, alerts, secret scanning, dependency audit, SHA-pinned CI actions, and CodeQL. The AWS SDK packages are kept in lockstep; the 2026 `fast-xml-parser` transitive advisories are removed from the locked graph and the moderate-level audit passes.
+- public-source history scanning covers forbidden paths and every reachable Git blob; CI executes untrusted fork code only on disposable hosted runners with read-only repository permissions and no production secrets.
 
 ## Secret rotation
 

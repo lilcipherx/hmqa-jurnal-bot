@@ -7,6 +7,7 @@ Record date, candidate Git SHA/image digests, operator, environment, and links t
 - [ ] `pnpm verify:runtime` passed for the exact candidate and its JSON evidence was retained;
 - [ ] clean `pnpm install --frozen-lockfile`, format, lint, typecheck, unit, integration, E2E, and build;
 - [ ] moderate-or-higher dependency audit, secret scan, SHA-pinned action review, and CodeQL pass;
+- [ ] public audit covers tracked paths, reachable Git blobs, PII heuristics, forbidden archives/keys, and confirms no unreviewed `LICENSE` grant;
 - [ ] clean-database migrations and twice-run seed pass;
 - [ ] requirement-to-evidence matrix reviewed with no mandatory placeholder/TODO path.
 

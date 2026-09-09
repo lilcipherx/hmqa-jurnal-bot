@@ -10,6 +10,90 @@
 - BotFather ownership and a public `BOT_BASE_URL` whose `/telegram/webhook` path reaches the bot service.
 - a pinned LibreOffice Writer no-GUI package and approved fonts in the file-worker image for deterministic DOCX page rendering.
 
+## Clean Ubuntu 24.04 server preparation
+
+The following bootstrap uses Docker's official apt repository and a checksum-verified Node.js archive. Replace `<candidate-sha>` with the exact CI-green commit and review every environment value before execution.
+
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl git xz-utils
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"
+```
+
+Start a new login session after the group change, then verify Docker and install the repository's pinned Node/pnpm toolchain:
+
+```bash
+docker version
+docker compose version
+node_version=24.11.1
+curl -fsSLO "https://nodejs.org/dist/v${node_version}/node-v${node_version}-linux-x64.tar.xz"
+curl -fsSLO "https://nodejs.org/dist/v${node_version}/SHASUMS256.txt"
+grep " node-v${node_version}-linux-x64.tar.xz$" SHASUMS256.txt | sha256sum --check --strict
+sudo tar -xJf "node-v${node_version}-linux-x64.tar.xz" -C /usr/local --strip-components=1
+rm "node-v${node_version}-linux-x64.tar.xz" SHASUMS256.txt
+sudo corepack enable
+corepack prepare pnpm@11.19.0 --activate
+node --version
+pnpm --version
+```
+
+Clone and detach verification from a moving branch:
+
+```bash
+git clone https://github.com/lilcipherx/hmqa-jurnal-bot.git
+cd hmqa-jurnal-bot
+git fetch --tags --prune
+git checkout --detach <candidate-sha>
+test "$(git rev-parse HEAD)" = "<candidate-sha>"
+pnpm install --frozen-lockfile
+pnpm db:generate
+pnpm compose:validate
+pnpm security:public
+```
+
+Create `.env` from the inventory, replace every placeholder, restrict it to the deployment user, and validate Compose before starting anything:
+
+```bash
+cp .env.example .env
+chmod 600 .env
+${EDITOR:-vi} .env
+docker compose --env-file .env config --quiet
+```
+
+Run the isolated acceptance drill before staging. It uses `.env.test.example`, never the production `.env`, and cleans only its run-specific project:
+
+```bash
+HMQA_RUNTIME_PROJECT="hmqa-verification-$(git rev-parse --short HEAD)" pnpm verify:runtime
+node -e "const report=require('./.codex-temp/runtime-verification/report.json'); if(report.outcome!=='PASSED') process.exit(1)"
+```
+
+Then start staging with operator-approved configuration, apply forward migrations through the one-shot service, and inspect readiness:
+
+```bash
+docker compose --env-file .env up -d --build postgres redis minio minio-init clamav
+docker compose --env-file .env run --rm migrate
+docker compose --env-file .env up -d api bot worker admin-web nginx
+docker compose --env-file .env --profile monitoring up -d
+docker compose --env-file .env ps
+docker compose --env-file .env logs --tail=200 migrate api bot worker admin-web nginx
+```
+
+Do not run the development seed in staging unless the environment is explicitly disposable and Academy-approved synthetic fixtures are required. A real staging smoke/UAT and verified backup must still be recorded before promotion.
+
 Do not expose PostgreSQL, Redis, MinIO, ClamAV, worker, or internal API addresses publicly. The bundled Compose file publishes only nginx.
 
 ## Configuration and secrets

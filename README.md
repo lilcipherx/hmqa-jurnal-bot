@@ -2,6 +2,9 @@
 
 Production-oriented monorepo for receiving and managing journal submissions through a normal Telegram bot. The author journey does **not** use a Telegram Mini App.
 
+[![CI](https://github.com/lilcipherx/hmqa-jurnal-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/lilcipherx/hmqa-jurnal-bot/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/lilcipherx/hmqa-jurnal-bot/actions/workflows/codeql.yml/badge.svg)](https://github.com/lilcipherx/hmqa-jurnal-bot/actions/workflows/codeql.yml)
+
 The Markdown PRD is the product source of truth. Architectural decisions, source differences, and Academy-owned open decisions are recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## What is included
@@ -13,6 +16,8 @@ The Markdown PRD is the product source of truth. Architectural decisions, source
 - BullMQ outbox delivery with exponential retry, leases, deterministic job IDs, notification delivery receipts, localized immutable PDF submission receipts, dead-letter state, and controlled replay;
 - localized Next.js administration for journals, requirement versions, staff invitations, assignments, reviews, decisions, messages, translations, reports, audit, and operations;
 - Docker Compose, migrations, synthetic seed data, Prometheus alerts, encrypted off-host backups, restore tooling, and CI gates.
+
+Authors use the standard Telegram chat interface for registration, language selection, profile management, journal requirements, durable drafts, coauthors and metadata, uploads, preview, submission, status tracking, revisions, notifications, help, and contacts. Editorial staff use a separate localized web application with mandatory backend authorization and 2FA. All user surfaces support `uz-Latn`, `ru`, and `en` through the centralized i18n package.
 
 ## Repository map
 
@@ -50,12 +55,26 @@ Prerequisites: Docker Engine with Compose v2. The build image supplies Node.js 2
 
 For a public Telegram webhook, `BOT_BASE_URL` must be an HTTPS origin routed to `/telegram/webhook`. Staging/production startup registers that URL with the configured secret header.
 
+## Environment inventory
+
+`.env.example` is the complete variable inventory. Important groups are:
+
+- public origins and Telegram: `APP_BASE_URL`, `ADMIN_BASE_URL`, `BOT_BASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `PUBLIC_BOT_USERNAME`;
+- data and queues: `DATABASE_URL`, `REDIS_URL`;
+- private storage: `S3_ENDPOINT`, clean/quarantine bucket names, access credentials, encryption and signed-URL lifetime;
+- processing: ClamAV address, upload limits, quarantine directory, LibreOffice executable and timeouts;
+- staff security: service/session/encryption secrets, local-auth policy and session lifetimes;
+- operations: metrics token, OpenTelemetry/Sentry destinations, retention gates and encrypted restic backup configuration.
+
+Staging and production fail fast on placeholder/short secrets, malformed Telegram tokens, non-HTTPS public origins, or a shared clean/quarantine bucket. Do not derive real configuration from `.env.test.example`; it is an explicitly synthetic acceptance fixture.
+
 ## Developer checks
 
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
 pnpm db:generate
+pnpm compose:validate
 pnpm format:check
 pnpm lint
 pnpm typecheck
@@ -63,6 +82,8 @@ pnpm build
 pnpm test
 pnpm test:i18n
 pnpm security:secrets
+pnpm security:public
+pnpm audit --audit-level moderate
 ```
 
 The convenience commands `pnpm test:integration` and `pnpm test:e2e` skip when their services are absent. Release and CI gates use `pnpm test:integration:required`, `pnpm test:e2e:required`, and `pnpm test:runtime:required`; these fail on a missing dependency, any skipped assertion, or zero executed tests.
@@ -76,6 +97,12 @@ pnpm verify:runtime
 This command requires a working Docker Engine and Compose v2. It creates the isolated `hmqa-local-verification` Compose project, uses an ephemeral host port unless `HMQA_RUNTIME_HTTP_PORT` is explicitly set, builds all images, migrates a database from zero, runs the seed repeatedly, executes PostgreSQL/Redis/MinIO/ClamAV/LibreOffice tests, starts every application, exercises Telegram and admin paths, injects dependency outages, and performs an encrypted backup plus checksum-verified restore into separate recovery services. It removes only that project and its test volumes when finished. Set `KEEP_RUNTIME_STACK=true` only when inspecting a failed test stack. Machine-readable evidence is written to `.codex-temp/runtime-verification/report.json`.
 
 `.env.test.example`, `docker-compose.test.yml`, and the Telegram API fixture are strictly marked `DEV/TEST ONLY — REQUIRES ACADEMY APPROVAL`; they are not loaded by the default production Compose path. CI runs both the focused PostgreSQL/Redis suites and the full Compose runtime drill, so missing runtime services cannot result in a green required check.
+
+## CI and public-source safety
+
+CI runs on disposable Ubuntu 24.04 GitHub-hosted runners. It uses no production secrets, grants only read access to repository contents in the main workflow, disables persisted checkout credentials, pins third-party actions to commit SHA, and never uses `pull_request_target`. PostgreSQL and Redis integration tests and the full MinIO/ClamAV/LibreOffice Compose drill are mandatory gates; required suites fail on skipped or zero tests.
+
+`pnpm security:public` checks forbidden tracked paths, all reachable Git blobs, high-confidence secret formats, non-reserved email domains, and plausible phone numbers. This complements dependency audit, the working-tree secret scan, CodeQL, and human review; it does not make public issue content an approved channel for vulnerability reports.
 
 ## Operational documentation
 
@@ -92,3 +119,7 @@ This command requires a working Docker Engine and Compose v2. It creates the iso
 ## Release boundary
 
 No release is production-approved until the Academy supplies the open product policies, production domains/secrets, approved translations/privacy copy, and a staging environment, and the release checklist records clean Compose, MinIO/ClamAV, backup/restore, Telegram, and UAT evidence. See `IMPLEMENTATION_STATUS.md`; absence of local Docker is not represented as a successful integration test.
+
+## Contributing, security, and license
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). No software license has been approved by the owner, so this repository intentionally contains no `LICENSE` file. Public visibility does not grant reuse rights beyond those provided by applicable law.
