@@ -223,11 +223,12 @@ export async function createApp({
     s3.destroy();
   });
 
-  app.addHook('onRequest', (request, reply) => {
+  app.addHook('onRequest', (request, reply, done) => {
     request.actorLocale = normalizeLocale(request.headers['accept-language']);
     reply.header('x-request-id', request.id);
     (request as FastifyRequest & { requestStartedAt?: bigint }).requestStartedAt =
       process.hrtime.bigint();
+    done();
   });
   app.addHook('onResponse', async (request, reply) => {
     const started = (request as FastifyRequest & { requestStartedAt?: bigint }).requestStartedAt;
