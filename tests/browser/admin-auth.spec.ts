@@ -142,6 +142,13 @@ test('admin auth, protected navigation, staff reset, self re-enrollment, and log
   await expect(page).toHaveURL(/\/users$/);
   const operatorRow = page.locator('tr', { hasText: 'operator@example.invalid' });
   await expect(operatorRow).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileWidth = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+  }));
+  expect(mobileWidth.document).toBeLessThanOrEqual(mobileWidth.viewport);
+  await page.setViewportSize({ width: 1280, height: 720 });
   await operatorRow.locator('[data-testid^="reset-totp-"]').click();
   const staffResetForm = operatorRow.locator('[data-testid^="reset-totp-form-"]');
   await staffResetForm.locator('input[name="currentPassword"]').fill(password);
