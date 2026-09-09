@@ -97,6 +97,16 @@ test('admin auth, protected navigation, staff reset, self re-enrollment, and log
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.locator('.app-shell')).toBeVisible();
 
+  const forbiddenPage = await page.goto('/submissions');
+  expect(forbiddenPage).not.toBeNull();
+  expect(forbiddenPage!.status()).toBe(403);
+  await expect(page.locator('h1')).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('ADMIN_API_403');
+  await expect(page.locator('body')).not.toContainText('Internal Server Error');
+
+  await page.goto('/dashboard');
+  await expect(page.locator('.app-shell')).toBeVisible();
+
   await page.locator('a[href="/settings"]').click();
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.locator('.app-shell')).toBeVisible();
