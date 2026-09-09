@@ -68,6 +68,29 @@ if (result.error) throw result.error;
 if (result.status !== 0) {
   try {
     const failedReport = JSON.parse(readFileSync(reportPath, 'utf8'));
+    const diagnostics = {
+      success: failedReport.success,
+      numTotalTests: failedReport.numTotalTests,
+      numPassedTests: failedReport.numPassedTests,
+      numFailedTests: failedReport.numFailedTests,
+      numPendingTests: failedReport.numPendingTests,
+      testExecError: failedReport.testExecError,
+      unhandledErrors: failedReport.unhandledErrors,
+      files: (failedReport.testResults ?? []).map((testFile) => ({
+        name: testFile.name,
+        status: testFile.status,
+        message: testFile.message,
+        failedAssertions: (testFile.assertionResults ?? [])
+          .filter((assertion) => assertion.status === 'failed')
+          .map((assertion) => ({
+            name: assertion.fullName ?? assertion.title,
+            failureMessages: assertion.failureMessages,
+          })),
+      })),
+    };
+    process.stderr.write(
+      `VITEST_FAILURE_DIAGNOSTICS ${JSON.stringify(diagnostics).slice(0, 16_000)}\n`,
+    );
     for (const testFile of failedReport.testResults ?? []) {
       if (testFile.status !== 'failed') continue;
       process.stderr.write(`FAILED ${testFile.name ?? 'unknown test file'}\n`);
