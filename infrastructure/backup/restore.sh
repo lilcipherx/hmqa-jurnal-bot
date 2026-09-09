@@ -15,8 +15,8 @@ backup_root="$(dirname "$dump_path")"
 test -f "$backup_root/postgres.dump.sha256"
 (
   cd "$backup_root"
-  sha256sum --check postgres.dump.sha256
-  if [[ -s objects.sha256 ]]; then sha256sum --check objects.sha256; fi
+  sha256sum -c postgres.dump.sha256
+  if [[ -s objects.sha256 ]]; then sha256sum -c objects.sha256; fi
 )
 pg_restore --clean --if-exists --no-owner --no-acl --dbname="$PGDATABASE" "$dump_path"
 mc alias set target "$SOURCE_S3_ENDPOINT" "$SOURCE_S3_ACCESS_KEY" "$SOURCE_S3_SECRET_KEY" >/dev/null

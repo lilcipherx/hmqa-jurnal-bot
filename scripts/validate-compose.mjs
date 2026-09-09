@@ -5,6 +5,7 @@ const base = parse(readFileSync('docker-compose.yml', 'utf8'), { merge: true });
 const test = parse(readFileSync('docker-compose.test.yml', 'utf8'), { merge: true });
 const dockerfile = readFileSync('infrastructure/docker/Dockerfile', 'utf8');
 const backupDockerfile = readFileSync('infrastructure/docker/backup.Dockerfile', 'utf8');
+const restoreScript = readFileSync('infrastructure/backup/restore.sh', 'utf8');
 const requiredServices = [
   'postgres',
   'redis',
@@ -105,6 +106,15 @@ assert(!/COPY[^\n]*\.env/i.test(dockerfile), 'Runtime image must not copy enviro
 assert(
   /ENTRYPOINT \["\/usr\/local\/bin\/hmqa-backup"\]/.test(backupDockerfile),
   'Backup entrypoint missing',
+);
+assert(
+  /sha256sum -c postgres\.dump\.sha256/.test(restoreScript) &&
+    /sha256sum -c objects\.sha256/.test(restoreScript),
+  'Restore checksums must use the BusyBox-compatible sha256sum -c option',
+);
+assert(
+  !/sha256sum --check/.test(restoreScript),
+  'Restore checksums must not use GNU-only sha256sum options',
 );
 
 if (failures.length > 0) {
