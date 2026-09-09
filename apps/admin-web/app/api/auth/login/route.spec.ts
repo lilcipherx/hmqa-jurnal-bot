@@ -36,9 +36,12 @@ describe('admin login BFF', () => {
     );
 
     const response = await POST(
-      new Request('https://admin.test/api/auth/login', {
+      new Request('http://admin-web.test/api/auth/login', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          'x-forwarded-proto': 'https',
+        },
         body: JSON.stringify({
           email: 'admin@example.invalid',
           password: 'test-password',
@@ -59,5 +62,54 @@ describe('admin login BFF', () => {
       expect(cookie).toMatch(/Secure/i);
       expect(cookie).toMatch(/SameSite=Strict/i);
     }
+  });
+
+  it('does not mark the CSRF cookie Secure on the isolated HTTP gateway', async () => {
+    vi.stubEnv('API_INTERNAL_URL', 'http://api.test:3001');
+    vi.stubEnv('NODE_ENV', 'production');
+    const upstreamHeaders = new Headers({ 'content-type': 'application/json' });
+    upstreamHeaders.append(
+      'set-cookie',
+      'hmqa_session=test-session; Max-Age=43200; Path=/; HttpOnly; SameSite=Strict',
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              sessionId: '00000000-0000-4000-8000-000000000001',
+              csrfToken: 'test-csrf',
+              expiresAt: '2026-09-10T00:00:00.000Z',
+            }),
+            { status: 200, headers: upstreamHeaders },
+          ),
+        ),
+      ),
+    );
+
+    const response = await POST(
+      new Request('http://admin.test/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-forwarded-proto': 'http',
+        },
+        body: JSON.stringify({
+          email: 'admin@example.invalid',
+          password: 'test-password',
+          totp: '000000',
+        }),
+      }),
+    );
+
+    const csrfCookie = response.headers
+      .getSetCookie()
+      .find((value) => value.startsWith('hmqa_csrf='));
+    expect(csrfCookie).toBeDefined();
+    expect(csrfCookie).not.toMatch(/;\s*Secure(?:;|$)/i);
+    expect(csrfCookie).toMatch(/Path=\//i);
+    expect(csrfCookie).toMatch(/HttpOnly/i);
+    expect(csrfCookie).toMatch(/SameSite=Strict/i);
   });
 });

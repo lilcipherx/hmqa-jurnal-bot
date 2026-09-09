@@ -8,6 +8,15 @@ function setCookieHeaders(headers: Headers): string[] {
   return value ? [value] : [];
 }
 
+function isSecureRequest(request: Request): boolean {
+  const forwardedProtocol = request.headers
+    .get('x-forwarded-proto')
+    ?.split(',', 1)[0]
+    ?.trim()
+    .toLowerCase();
+  return (forwardedProtocol ?? new URL(request.url).protocol.replace(':', '')) === 'https';
+}
+
 export async function POST(request: Request) {
   const response = await fetch(internalApiUrl('/api/v1/auth/login'), {
     method: 'POST',
@@ -26,7 +35,7 @@ export async function POST(request: Request) {
     if (typeof parsed.csrfToken === 'string') {
       result.cookies.set('hmqa_csrf', parsed.csrfToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: isSecureRequest(request),
         sameSite: 'strict',
         path: '/',
         maxAge: 8 * 60 * 60,
