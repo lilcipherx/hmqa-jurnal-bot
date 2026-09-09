@@ -5,6 +5,7 @@ const base = parse(readFileSync('docker-compose.yml', 'utf8'), { merge: true });
 const test = parse(readFileSync('docker-compose.test.yml', 'utf8'), { merge: true });
 const dockerfile = readFileSync('infrastructure/docker/Dockerfile', 'utf8');
 const backupDockerfile = readFileSync('infrastructure/docker/backup.Dockerfile', 'utf8');
+const backupScript = readFileSync('infrastructure/backup/backup.sh', 'utf8');
 const restoreScript = readFileSync('infrastructure/backup/restore.sh', 'utf8');
 const innerNginx = readFileSync('infrastructure/nginx/nginx.conf', 'utf8');
 const hostNginx = readFileSync('infrastructure/nginx/hmqa-staging.conf', 'utf8');
@@ -142,6 +143,12 @@ assert(!/COPY[^\n]*\.env/i.test(dockerfile), 'Runtime image must not copy enviro
 assert(
   /ENTRYPOINT \["\/usr\/local\/bin\/hmqa-backup"\]/.test(backupDockerfile),
   'Backup entrypoint missing',
+);
+assert(
+  /restic forget[\s\S]*--tag hmqa[\s\S]*--group-by tags[\s\S]*--keep-daily[\s\S]*--prune/.test(
+    backupScript,
+  ),
+  'Backup retention must group ephemeral-container snapshots by tag',
 );
 assert(
   /sha256sum -c postgres\.dump\.sha256/.test(restoreScript) &&

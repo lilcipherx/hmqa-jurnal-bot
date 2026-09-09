@@ -36,7 +36,13 @@ restic backup \
   "$work_dir/objects.sha256" \
   "$work_dir/manifest.json" \
   --tag hmqa
-restic forget --keep-daily "${RESTIC_KEEP_DAILY:-14}" --keep-weekly "${RESTIC_KEEP_WEEKLY:-8}" --keep-monthly "${RESTIC_KEEP_MONTHLY:-12}" --prune
+restic forget \
+  --tag hmqa \
+  --group-by tags \
+  --keep-daily "${RESTIC_KEEP_DAILY:-14}" \
+  --keep-weekly "${RESTIC_KEEP_WEEKLY:-8}" \
+  --keep-monthly "${RESTIC_KEEP_MONTHLY:-12}" \
+  --prune
 restic check
 printf 'HMQA_BACKUP_EVIDENCE=%s\n' "$work_dir/manifest.json"
 cat "$work_dir/manifest.json"
