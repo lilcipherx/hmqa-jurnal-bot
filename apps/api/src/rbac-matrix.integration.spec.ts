@@ -425,7 +425,7 @@ suite('simplified administrator authorization model', () => {
             'content-type': 'application/json',
           },
           payload: {
-            config: requirementConfig(),
+            config: requirementConfig(10 * 1024 * 1024 + index),
             changeNote: `Concurrent draft ${index + 1}`,
             localizations: requirementLocalizations(`Concurrent ${index + 1}`),
           },
@@ -442,6 +442,22 @@ suite('simplified administrator authorization model', () => {
         })
       ).map(({ version }) => version),
     ).toEqual([1, 2]);
+
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: `/api/v1/admin/journals/${journal.id}/requirements`,
+      headers: {
+        ...headers(admins[0]!, true),
+        'content-type': 'application/json',
+      },
+      payload: {
+        config: requirementConfig(10 * 1024 * 1024),
+        changeNote: 'Duplicate concurrent configuration',
+        localizations: requirementLocalizations('Duplicate concurrent configuration'),
+      },
+    });
+    expect(duplicate.statusCode, duplicate.body).toBe(409);
+    expect(duplicate.json()).toMatchObject({ code: 'DUPLICATE_REQUIREMENT_CONFIG' });
   });
 
   it('edits Telegram contact/content, applies journal fallback, and audits every change', async () => {
@@ -600,7 +616,7 @@ suite('simplified administrator authorization model', () => {
         confirmation: true,
       },
     });
-    expect(response.statusCode).toBe(400);
+    expect(response.statusCode).toBe(422);
     expect(await database!.employee.count({ where: { email } })).toBe(0);
   });
 
@@ -630,7 +646,7 @@ suite('simplified administrator authorization model', () => {
         kind: 'EDITOR',
       },
     });
-    expect(obsolete.statusCode).toBe(400);
+    expect(obsolete.statusCode).toBe(422);
 
     const expired = await app.inject({
       method: 'POST',

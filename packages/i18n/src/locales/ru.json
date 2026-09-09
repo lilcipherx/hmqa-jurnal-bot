@@ -557,6 +557,7 @@
   "admin.journals.body": "Полный текст требований",
   "admin.journals.invalid_json": "JSON правил некорректен.",
   "admin.journals.invalid_config": "Сохранённая конфигурация требований некорректна. Создайте новую версию или обратитесь к администратору системы.",
+  "admin.journals.duplicate_requirement_config": "Для этого журнала уже существует версия требований с такими же правилами.",
   "admin.journals.requirement_history": "Версии требований",
   "admin.journals.requirement_preview": "Предпросмотр на трёх языках",
   "admin.journals.edit_requirement": "Редактировать черновик требований",

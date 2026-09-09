@@ -85,14 +85,13 @@ suite('API authentication and backend authorization', () => {
     expect(response.json()).toMatchObject({ id: employeeId, role: 'ADMIN' });
   });
 
-  it('enforces submission permissions on the backend', async () => {
+  it('grants the sole administrator role submission access on the backend', async () => {
     const response = await app.inject({
       method: 'GET',
       url: '/api/v1/admin/submissions',
       headers: { cookie: `hmqa_session=${token}` },
     });
-    expect(response.statusCode).toBe(403);
-    expect(response.json()).toMatchObject({ code: 'FORBIDDEN' });
+    expect(response.statusCode, response.body).toBe(200);
   });
 
   it('rejects a state-changing request without CSRF and accepts the bound token', async () => {

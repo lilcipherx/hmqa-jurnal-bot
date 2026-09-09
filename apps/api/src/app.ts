@@ -3949,6 +3949,15 @@ export async function createApp({
           orderBy: { version: 'desc' },
           select: { version: true },
         });
+        const duplicate = await tx.journalRequirementVersion.findUnique({
+          where: { journalId_configHash: { journalId, configHash } },
+          select: { id: true },
+        });
+        if (duplicate)
+          throw new BusinessRuleError(
+            'DUPLICATE_REQUIREMENT_CONFIG',
+            'admin.journals.duplicate_requirement_config',
+          );
         const requirement = await tx.journalRequirementVersion.create({
           data: {
             journalId,

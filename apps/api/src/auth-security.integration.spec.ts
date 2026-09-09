@@ -27,6 +27,11 @@ let invitation: { employeeId: string; secret: string; token: string };
 suite('staff authentication security', () => {
   beforeAll(async () => {
     const passwordHash = await hashPassword(password);
+    const adminRole = await database!.role.upsert({
+      where: { code: 'ADMIN' },
+      update: {},
+      create: { code: 'ADMIN', description: 'Integration administrator' },
+    });
     for (const name of ['valid', 'lockout', 'parallel']) {
       const secret = generateTotpSecret();
       const employee = await database!.employee.create({
@@ -37,6 +42,7 @@ suite('staff authentication security', () => {
           status: 'ACTIVE',
           totpEnabled: true,
           totpSecretCipher: encryptSecret(secret, encryptionKey),
+          roles: { create: { roleId: adminRole.id } },
         },
       });
       identities.set(name, { secret, employeeId: employee.id });
@@ -49,6 +55,7 @@ suite('staff authentication security', () => {
         displayName: 'Integration invitation',
         status: 'INVITED',
         totpSecretCipher: encryptSecret(invitationSecret, encryptionKey),
+        roles: { create: { roleId: adminRole.id } },
       },
     });
     await database!.staffInvitation.create({

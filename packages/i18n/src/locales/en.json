@@ -557,6 +557,7 @@
   "admin.journals.body": "Full requirement text",
   "admin.journals.invalid_json": "The rules JSON is invalid.",
   "admin.journals.invalid_config": "The stored requirement configuration is invalid. Create a new version or contact the system administrator.",
+  "admin.journals.duplicate_requirement_config": "This journal already has a requirement version with the same rules.",
   "admin.journals.requirement_history": "Requirement versions",
   "admin.journals.requirement_preview": "Three-language preview",
   "admin.journals.edit_requirement": "Edit requirement draft",

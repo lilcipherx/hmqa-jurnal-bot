@@ -557,6 +557,7 @@
   "admin.journals.body": "Talablarning to‘liq matni",
   "admin.journals.invalid_json": "Qoidalar JSON formati noto‘g‘ri.",
   "admin.journals.invalid_config": "Saqlangan talablar konfiguratsiyasi noto‘g‘ri. Yangi versiya yarating yoki tizim administratoriga murojaat qiling.",
+  "admin.journals.duplicate_requirement_config": "Bu jurnal uchun xuddi shu qoidalarga ega talablar versiyasi allaqachon mavjud.",
   "admin.journals.requirement_history": "Talablar versiyalari",
   "admin.journals.requirement_preview": "Uch tildagi ko‘rib chiqish",
   "admin.journals.edit_requirement": "Talablar qoralamasini tahrirlash",
