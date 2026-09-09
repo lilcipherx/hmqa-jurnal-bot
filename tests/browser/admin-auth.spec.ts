@@ -14,6 +14,7 @@ test('admin session survives SSR, refresh, protected navigation, and is revoked 
   }
 
   await page.goto('/login');
+  await expect(page.locator('form[data-hydrated="true"]')).toBeVisible();
   await page.locator('input[name="email"]').fill(email);
   await page.locator('input[name="password"]').fill(password);
   await page.locator('input[name="totp"]').fill(generateTotpCode(totpSecret));

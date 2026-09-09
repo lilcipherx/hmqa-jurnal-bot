@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
 export function LoginForm({
   labels,
@@ -9,6 +9,8 @@ export function LoginForm({
 }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
@@ -32,7 +34,12 @@ export function LoginForm({
     window.location.assign('/dashboard');
   }
   return (
-    <form className="form-stack" onSubmit={(event) => void submit(event)} aria-busy={busy}>
+    <form
+      className="form-stack"
+      onSubmit={(event) => void submit(event)}
+      aria-busy={busy}
+      data-hydrated={hydrated ? 'true' : 'false'}
+    >
       <label className="field" htmlFor="email">
         {labels.email}
         <input
