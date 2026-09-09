@@ -117,7 +117,7 @@ services:
     command: ['pnpm', '--filter', '@hmqa/bot', 'start']
     environment:
       PORT: 3002
-      APP_BASE_URL: http://api:3001
+      API_INTERNAL_URL: http://api:3001
     depends_on:
       api: { condition: service_started }
 

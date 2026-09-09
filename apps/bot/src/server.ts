@@ -17,7 +17,8 @@ if (config.SENTRY_DSN)
   });
 const logger = createLogger('bot', config.NODE_ENV, config.LOG_LEVEL);
 const app = Fastify({ loggerInstance: logger, trustProxy: true, bodyLimit: 1_048_576 });
-const api = new HmqaApiClient(config.APP_BASE_URL, config.SERVICE_AUTH_SECRET);
+const apiBaseUrl = config.API_INTERNAL_URL ?? config.APP_BASE_URL;
+const api = new HmqaApiClient(apiBaseUrl, config.SERVICE_AUTH_SECRET);
 const bot = createBot(config.TELEGRAM_BOT_TOKEN, api, config.BOT_API_BASE_URL);
 const telegramUpdateSchema = z.object({ update_id: z.number().int().nonnegative() }).passthrough();
 
@@ -26,7 +27,7 @@ app.get('/health/ready', async (_request, reply) => {
   try {
     const [, apiResponse] = await Promise.all([
       bot.api.getMe(),
-      fetch(new URL('/health/ready', config.APP_BASE_URL), {
+      fetch(new URL('/health/ready', apiBaseUrl), {
         signal: AbortSignal.timeout(5_000),
       }),
     ]);

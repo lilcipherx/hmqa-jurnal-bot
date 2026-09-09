@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
 const bool = z.enum(['true', 'false']).transform((value) => value === 'true');
+const optionalUrl = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.url().optional(),
+);
 
 const schema = z
   .object({
@@ -14,6 +18,7 @@ const schema = z
     DEFAULT_LOCALE: z.enum(['uz-Latn', 'ru', 'en']).default('uz-Latn'),
     SUPPORTED_LOCALES: z.literal('uz-Latn,ru,en').default('uz-Latn,ru,en'),
     APP_BASE_URL: z.url(),
+    API_INTERNAL_URL: optionalUrl,
     ADMIN_BASE_URL: z.url(),
     BOT_BASE_URL: z.url(),
     DATABASE_URL: z.string().min(1),
@@ -53,7 +58,7 @@ const schema = z
     SESSION_IDLE_MINUTES: z.coerce.number().int().min(5).max(240).default(30),
     SESSION_ABSOLUTE_HOURS: z.coerce.number().int().min(1).max(48).default(12),
     METRICS_TOKEN: z.string().min(1).default('development-only'),
-    OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
+    OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
     SENTRY_DSN: z.union([z.literal(''), z.url()]).optional(),
     RETENTION_DRAFT_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
     RETENTION_ENABLED: bool.default(false),

@@ -25,6 +25,22 @@ describe('environment validation', () => {
     expect(loadConfig(base).DEFAULT_LOCALE).toBe('uz-Latn');
   });
 
+  it('normalizes blank optional URL variables to absent values', () => {
+    const config = loadConfig({
+      ...base,
+      API_INTERNAL_URL: '',
+      OTEL_EXPORTER_OTLP_ENDPOINT: '   ',
+    });
+    expect(config.API_INTERNAL_URL).toBeUndefined();
+    expect(config.OTEL_EXPORTER_OTLP_ENDPOINT).toBeUndefined();
+  });
+
+  it('accepts a private service URL independently from the public HTTPS URL', () => {
+    expect(loadConfig({ ...base, API_INTERNAL_URL: 'http://api:3001' }).API_INTERNAL_URL).toBe(
+      'http://api:3001',
+    );
+  });
+
   it('fails production with placeholder secrets or HTTP public URLs', () => {
     expect(() => loadConfig({ ...base, NODE_ENV: 'production' })).toThrow(
       'Invalid environment configuration',
