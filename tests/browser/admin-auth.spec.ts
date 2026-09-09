@@ -57,11 +57,6 @@ test('admin session survives SSR, refresh, protected navigation, and is revoked 
 
   const loginEvidence = await loginEvidencePromise;
   expect(loginEvidence.status).toBe(200);
-  const responseShape = await page.evaluate(() => {
-    const stored = window.sessionStorage.getItem('hmqa-auth-test-response-shape');
-    return stored ? (JSON.parse(stored) as string[]) : null;
-  });
-  expect(responseShape).toEqual(['csrfToken', 'expiresAt', 'sessionId']);
   const setCookies = loginEvidence.headers.filter(
     ({ name }) => name.toLowerCase() === 'set-cookie',
   );
@@ -71,6 +66,11 @@ test('admin session survives SSR, refresh, protected navigation, and is revoked 
   const dashboardCookie = dashboardEvidence.headers.cookie ?? '';
   expect(dashboardCookie).toMatch(/(?:^|;\s*)hmqa_session=/);
   await expect(page).toHaveURL(/\/dashboard$/);
+  const responseShape = await page.evaluate(() => {
+    const stored = window.sessionStorage.getItem('hmqa-auth-test-response-shape');
+    return stored ? (JSON.parse(stored) as string[]) : null;
+  });
+  expect(responseShape).toEqual(['csrfToken', 'expiresAt', 'sessionId']);
 
   const cookies = await page.context().cookies(baseUrl);
   const byName = new Map(cookies.map((cookie) => [cookie.name, cookie]));
