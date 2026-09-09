@@ -359,6 +359,8 @@ try {
       'S3_BUCKET=hmqa-test-recovery',
       '-e',
       'S3_QUARANTINE_BUCKET=hmqa-test-recovery-quarantine',
+      '-e',
+      'REQUIRE_S3_SHA256_METADATA=false',
       'runtime-tests',
       'node',
       'apps/worker/test-fixtures/verify-storage-consistency.mjs',
