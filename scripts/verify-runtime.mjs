@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
 
@@ -163,6 +163,7 @@ function captureFailureDiagnostics() {
 
 mkdirSync(reportDirectory, { recursive: true });
 mkdirSync(browserResultsDirectory, { recursive: true });
+chmodSync(browserResultsDirectory, 0o777);
 
 try {
   execute('docker', ['version'], { label: 'Docker engine preflight' });
