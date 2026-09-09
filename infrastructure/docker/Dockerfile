@@ -1,7 +1,10 @@
 FROM node:24.11.1-bookworm-slim AS build
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable && corepack prepare pnpm@11.19.0 --activate
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/* \
+  && corepack enable && corepack prepare pnpm@11.19.0 --activate
 WORKDIR /workspace
 COPY . .
 RUN pnpm install --frozen-lockfile
@@ -13,11 +16,11 @@ ENV NODE_ENV=production
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends fonts-dejavu-core fonts-liberation libreoffice-writer-nogui \
+  && apt-get install -y --no-install-recommends fonts-dejavu-core fonts-liberation libreoffice-writer-nogui openssl \
   && rm -rf /var/lib/apt/lists/* \
   && corepack enable && corepack prepare pnpm@11.19.0 --activate \
-  && mkdir -p /var/lib/hmqa/quarantine \
-  && chown -R node:node /var/lib/hmqa
+  && mkdir -p /workspace /var/lib/hmqa/quarantine \
+  && chown -R node:node /workspace /var/lib/hmqa
 WORKDIR /workspace
 
 FROM runtime-base AS verification

@@ -96,6 +96,13 @@ jobs:
         run: pnpm db:seed && pnpm db:seed
       - run: pnpm test:integration:required
       - run: pnpm test:e2e:required
+      - name: Preserve integration evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: focused-test-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .codex-temp/test-reports/*.json
+          if-no-files-found: warn
 
   runtime:
     runs-on: ubuntu-24.04

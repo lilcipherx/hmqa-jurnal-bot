@@ -65,7 +65,27 @@ const result = spawnSync(
 if (result.stdout) process.stdout.write(result.stdout);
 if (result.stderr) process.stderr.write(result.stderr);
 if (result.error) throw result.error;
-if (result.status !== 0) process.exit(result.status ?? 1);
+if (result.status !== 0) {
+  try {
+    const failedReport = JSON.parse(readFileSync(reportPath, 'utf8'));
+    for (const testFile of failedReport.testResults ?? []) {
+      if (testFile.status !== 'failed') continue;
+      process.stderr.write(`FAILED ${testFile.name ?? 'unknown test file'}\n`);
+      for (const assertion of testFile.assertionResults ?? []) {
+        if (assertion.status !== 'failed') continue;
+        process.stderr.write(`  ${assertion.fullName ?? assertion.title ?? 'unknown assertion'}\n`);
+        for (const message of assertion.failureMessages ?? []) {
+          process.stderr.write(`${String(message).slice(0, 4_000)}\n`);
+        }
+      }
+    }
+  } catch (reportError) {
+    process.stderr.write(
+      `Unable to read failed ${suite} report: ${reportError instanceof Error ? reportError.message : String(reportError)}\n`,
+    );
+  }
+  process.exit(result.status ?? 1);
+}
 
 const report = JSON.parse(readFileSync(reportPath, 'utf8'));
 const skippedAssertions = (report.testResults ?? []).flatMap((testFile) =>

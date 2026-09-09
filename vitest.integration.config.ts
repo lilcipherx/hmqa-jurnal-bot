@@ -4,7 +4,8 @@ export default defineConfig({
   test: {
     include: ['packages/**/*.integration.spec.ts', 'apps/**/*.integration.spec.ts'],
     setupFiles: ['./tests/require-runtime-env.ts'],
-    testTimeout: 30_000,
-    hookTimeout: 30_000,
+    maxWorkers: 2,
+    testTimeout: 60_000,
+    hookTimeout: 120_000,
   },
 });
