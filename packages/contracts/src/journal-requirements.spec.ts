@@ -29,6 +29,13 @@ describe('journal requirement file contract', () => {
       requiredReviewerCount: 0,
       decisionRequiresCompletedReviews: false,
     });
+    expect(result.metadata).toEqual({
+      abstractMinWords: 150,
+      abstractMaxWords: 300,
+      keywordMinCount: 5,
+      keywordMaxCount: 10,
+      coauthorMaxCount: 10,
+    });
   });
 
   it('rejects duplicate categories', () => {
@@ -64,6 +71,23 @@ describe('journal requirement file contract', () => {
           reviewModel: 'DOUBLE_BLIND',
           requiredReviewerCount: 0,
           decisionRequiresCompletedReviews: true,
+        },
+      }),
+    ).toThrow();
+  });
+
+  it('rejects inverted configurable metadata limits', () => {
+    expect(() =>
+      journalRequirementConfigSchema.parse({
+        requiredFiles: [manuscript],
+        limits: { maxBytes: 1024, maxFiles: 1, maxTotalBytes: 1024 },
+        preflight: { docx: { rulesVersion: 'test-v1' } },
+        metadata: {
+          abstractMinWords: 300,
+          abstractMaxWords: 150,
+          keywordMinCount: 10,
+          keywordMaxCount: 5,
+          coauthorMaxCount: 10,
         },
       }),
     ).toThrow();

@@ -17,6 +17,7 @@ export async function POST(request: Request) {
     },
     body: await request.text(),
     cache: 'no-store',
+    signal: AbortSignal.timeout(12_000),
   });
   return new NextResponse(await response.text(), {
     status: response.status,

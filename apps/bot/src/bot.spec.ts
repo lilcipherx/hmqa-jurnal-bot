@@ -1,6 +1,6 @@
 import type { Update } from 'grammy/types';
 import { describe, expect, it, vi } from 'vitest';
-import { botCommands, createBot, type BotApi } from './bot.js';
+import { botCommands, createBot, resolveUserLocale, type BotApi } from './bot.js';
 
 function update(updateId: number, text: string): Update {
   return {
@@ -74,6 +74,12 @@ describe('Telegram conversation', () => {
       expect(commands.map(({ command }) => command)).toEqual(expected);
       expect(commands.every(({ description }) => description.length > 0)).toBe(true);
     }
+  });
+
+  it('prefers the persisted locale for error responses', () => {
+    expect(resolveUserLocale('en', 'ru')).toBe('en');
+    expect(resolveUserLocale(null, 'ru')).toBe('ru');
+    expect(resolveUserLocale(undefined, 'unknown')).toBe('uz-Latn');
   });
 
   it('starts with language selection and persists update completion through the API', async () => {

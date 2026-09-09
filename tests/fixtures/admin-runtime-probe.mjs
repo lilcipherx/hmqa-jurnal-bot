@@ -79,6 +79,13 @@ async function webGet(session, path, locale = 'en') {
     200,
     `WEB ${path} (${locale})`,
   );
+  const csp = response.headers.get('content-security-policy');
+  if (!csp || !/script-src[^;]*'nonce-[^']+'[^;]*'strict-dynamic'/.test(csp)) {
+    throw new Error(`WEB ${path} (${locale}) is missing a nonce-based script policy`);
+  }
+  if (/script-src[^;]*'unsafe-inline'/.test(csp)) {
+    throw new Error(`WEB ${path} (${locale}) allows unsafe-inline scripts`);
+  }
   const html = await response.text();
   if (/\b(?:admin|menu|status|validation)\.[a-z0-9_.-]+\b/.test(html))
     throw new Error(`WEB ${path} (${locale}) leaked a raw translation key`);

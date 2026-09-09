@@ -519,13 +519,18 @@ export async function createApp({
             )
           : false;
       if (!passwordOk || !totpOk) {
-        const failures = employee.failedLoginCount + 1;
-        await database.employee.update({
-          where: { id: employee.id },
-          data: {
-            failedLoginCount: failures,
-            lockedUntil: failures >= 5 ? new Date(Date.now() + 15 * 60_000) : null,
-          },
+        await database.$transaction(async (tx) => {
+          const failed = await tx.employee.update({
+            where: { id: employee.id },
+            data: { failedLoginCount: { increment: 1 } },
+            select: { failedLoginCount: true },
+          });
+          if (failed.failedLoginCount >= 5) {
+            await tx.employee.update({
+              where: { id: employee.id },
+              data: { lockedUntil: new Date(Date.now() + 15 * 60_000) },
+            });
+          }
         });
         authDenied.inc({ reason: 'login' });
         return reply.code(401).send({
@@ -1903,12 +1908,27 @@ export async function createApp({
             );
           const articleSection = requiredContextString(context, 'articleSection', 100);
           const abstract = requiredContextString(context, 'abstract', 10_000);
+          const abstractWords = abstract.trim().split(/\s+/u).length;
+          if (
+            abstractWords < ruleConfig.data.metadata.abstractMinWords ||
+            abstractWords > ruleConfig.data.metadata.abstractMaxWords
+          ) {
+            throw new BusinessRuleError(
+              'ABSTRACT_WORD_COUNT_INVALID',
+              'validation.abstract_policy',
+              422,
+            );
+          }
           const keywords = requiredContextString(context, 'keywords', 2_000)
             .split(/[,;\n]/)
             .map((item) => item.trim())
             .filter(Boolean);
-          if (keywords.length < 3 || keywords.length > 20)
-            throw new Error('KEYWORDS_COUNT_INVALID');
+          if (
+            keywords.length < ruleConfig.data.metadata.keywordMinCount ||
+            keywords.length > ruleConfig.data.metadata.keywordMaxCount
+          ) {
+            throw new BusinessRuleError('KEYWORDS_COUNT_INVALID', 'validation.keyword_policy', 422);
+          }
           const coauthorInput = requiredContextString(context, 'coauthors', 10_000);
           const coauthors =
             coauthorInput === '-'
@@ -1931,7 +1951,9 @@ export async function createApp({
                     organization: coauthorOrganization,
                   };
                 });
-          if (coauthors.length > 10) throw new Error('COAUTHOR_LIMIT');
+          if (coauthors.length > ruleConfig.data.metadata.coauthorMaxCount) {
+            throw new BusinessRuleError('COAUTHOR_LIMIT', 'validation.coauthor_policy', 422);
+          }
           const emailCipher = encryptSecret(email, config.ENCRYPTION_KEY);
           const phoneCipher = encryptSecret(phone, config.ENCRYPTION_KEY);
           await tx.authorProfile.upsert({

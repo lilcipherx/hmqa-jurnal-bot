@@ -8,7 +8,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const response = await fetch(
     internalApiUrl(`/api/v1/admin/files/${encodeURIComponent(id)}/download`),
-    { headers: { cookie: `hmqa_session=${encodeURIComponent(token)}` }, cache: 'no-store' },
+    {
+      headers: { cookie: `hmqa_session=${encodeURIComponent(token)}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(12_000),
+    },
   );
   if (!response.ok)
     return new NextResponse(await response.text(), {

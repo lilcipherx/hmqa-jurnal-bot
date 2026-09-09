@@ -19,7 +19,7 @@ let app: Awaited<ReturnType<typeof createApp>>;
 suite('staff authentication security', () => {
   beforeAll(async () => {
     const passwordHash = await hashPassword(password);
-    for (const name of ['valid', 'lockout']) {
+    for (const name of ['valid', 'lockout', 'parallel']) {
       const secret = generateTotpSecret();
       const employee = await database!.employee.create({
         data: {
@@ -62,7 +62,7 @@ suite('staff authentication security', () => {
     await database?.$disconnect();
   });
 
-  async function login(name: string, passwordValue: string) {
+  async function login(name: string, passwordValue: string, remoteAddress?: string) {
     const identity = identities.get(name)!;
     const employee = await database!.employee.findUniqueOrThrow({
       where: { id: identity.employeeId },
@@ -70,6 +70,7 @@ suite('staff authentication security', () => {
     return app.inject({
       method: 'POST',
       url: '/api/v1/auth/login',
+      ...(remoteAddress ? { remoteAddress } : {}),
       payload: {
         email: employee.email,
         password: passwordValue,
@@ -100,6 +101,22 @@ suite('staff authentication security', () => {
     expect(locked.statusCode).toBe(401);
     const employee = await database!.employee.findUniqueOrThrow({
       where: { id: identities.get('lockout')!.employeeId },
+    });
+    expect(employee.failedLoginCount).toBe(5);
+    expect(employee.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('counts concurrent failed passwords atomically before applying lockout', async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        login('parallel', 'Wrong-integration-password-2026!', '203.0.113.20'),
+      ),
+    );
+    expect(responses.map((response) => response.statusCode)).toEqual([401, 401, 401, 401, 401]);
+    const locked = await login('parallel', password, '203.0.113.20');
+    expect(locked.statusCode).toBe(401);
+    const employee = await database!.employee.findUniqueOrThrow({
+      where: { id: identities.get('parallel')!.employeeId },
     });
     expect(employee.failedLoginCount).toBe(5);
     expect(employee.lockedUntil!.getTime()).toBeGreaterThan(Date.now());

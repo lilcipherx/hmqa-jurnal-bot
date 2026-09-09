@@ -13,6 +13,7 @@ export async function POST() {
         'x-csrf-token': csrf,
         origin: process.env.ADMIN_BASE_URL ?? 'http://localhost:3000',
       },
+      signal: AbortSignal.timeout(12_000),
     });
   const response = NextResponse.json({ ok: true });
   response.cookies.delete('hmqa_session');

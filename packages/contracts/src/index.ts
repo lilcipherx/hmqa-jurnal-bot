@@ -126,6 +126,32 @@ export const journalWorkflowPolicySchema = z
       });
   });
 
+export const journalMetadataPolicySchema = z
+  .object({
+    abstractMinWords: z.number().int().min(1).max(5_000).default(150),
+    abstractMaxWords: z.number().int().min(1).max(5_000).default(300),
+    keywordMinCount: z.number().int().min(1).max(100).default(5),
+    keywordMaxCount: z.number().int().min(1).max(100).default(10),
+    coauthorMaxCount: z.number().int().min(0).max(100).default(10),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.abstractMinWords > value.abstractMaxWords) {
+      context.addIssue({
+        code: 'custom',
+        path: ['abstractMaxWords'],
+        message: 'abstractMaxWords must be greater than or equal to abstractMinWords',
+      });
+    }
+    if (value.keywordMinCount > value.keywordMaxCount) {
+      context.addIssue({
+        code: 'custom',
+        path: ['keywordMaxCount'],
+        message: 'keywordMaxCount must be greater than or equal to keywordMinCount',
+      });
+    }
+  });
+
 export const journalRequirementConfigSchema = z
   .object({
     requiredFiles: z.array(journalRequirementFilePolicySchema).min(1).max(20),
@@ -155,6 +181,13 @@ export const journalRequirementConfigSchema = z
       reviewModel: 'NO_EXTERNAL_REVIEW',
       requiredReviewerCount: 0,
       decisionRequiresCompletedReviews: false,
+    }),
+    metadata: journalMetadataPolicySchema.default({
+      abstractMinWords: 150,
+      abstractMaxWords: 300,
+      keywordMinCount: 5,
+      keywordMaxCount: 10,
+      coauthorMaxCount: 10,
     }),
   })
   .passthrough()
@@ -271,3 +304,4 @@ export type JournalRequirementConfig = z.infer<typeof journalRequirementConfigSc
 export type JournalRequirementFilePolicy = z.infer<typeof journalRequirementFilePolicySchema>;
 export type DocxPreflightPolicy = z.infer<typeof docxPreflightPolicySchema>;
 export type PreflightSeverity = z.infer<typeof preflightSeveritySchema>;
+export type JournalMetadataPolicy = z.infer<typeof journalMetadataPolicySchema>;

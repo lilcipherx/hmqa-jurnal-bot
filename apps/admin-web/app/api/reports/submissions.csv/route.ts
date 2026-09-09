@@ -8,6 +8,7 @@ export async function GET() {
   const response = await fetch(internalApiUrl('/api/v1/admin/reports/submissions.csv'), {
     headers: { cookie: `hmqa_session=${encodeURIComponent(token)}` },
     cache: 'no-store',
+    signal: AbortSignal.timeout(12_000),
   });
   return new NextResponse(await response.arrayBuffer(), {
     status: response.status,

@@ -195,7 +195,7 @@ export function JournalManager({
           <textarea
             name="config"
             defaultValue={
-              '{"requiredFiles":[{"category":"MANUSCRIPT","labels":{"uz-Latn":"Asosiy maqola","ru":"Основная статья","en":"Main manuscript"},"formats":["docx"],"required":true,"preflightRequired":true}],"limits":{"maxBytes":19922944,"maxFiles":10,"maxTotalBytes":52428800},"preflight":{"docx":{"rulesVersion":"journal-draft-v1","requiredMarkers":[]}},"workflow":{"reviewModel":"NO_EXTERNAL_REVIEW","requiredReviewerCount":0,"decisionRequiresCompletedReviews":false}}'
+              '{"requiredFiles":[{"category":"MANUSCRIPT","labels":{"uz-Latn":"Asosiy maqola","ru":"Основная статья","en":"Main manuscript"},"formats":["docx"],"required":true,"preflightRequired":true}],"limits":{"maxBytes":19922944,"maxFiles":10,"maxTotalBytes":52428800},"metadata":{"abstractMinWords":150,"abstractMaxWords":300,"keywordMinCount":5,"keywordMaxCount":10,"coauthorMaxCount":10},"preflight":{"docx":{"rulesVersion":"journal-draft-v1","requiredMarkers":[]}},"workflow":{"reviewModel":"NO_EXTERNAL_REVIEW","requiredReviewerCount":0,"decisionRequiresCompletedReviews":false}}'
             }
             rows={5}
             required

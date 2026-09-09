@@ -8,6 +8,7 @@ import {
 import {
   journalRequirementConfigSchema,
   orcidSchema,
+  type JournalMetadataPolicy,
   type JournalRequirementFilePolicy,
 } from '@hmqa/contracts';
 import { Bot, InlineKeyboard, Keyboard, type Context } from 'grammy';
@@ -96,7 +97,21 @@ function consentKeyboard(locale: Locale) {
     .text(translate(locale, 'consent.decline'), 'consent:no');
 }
 
-function statePrompt(locale: Locale, state: string): string {
+export function resolveUserLocale(
+  selectedLocale: Locale | null | undefined,
+  telegramLocale: string | undefined,
+): Locale {
+  return selectedLocale ?? normalizeLocale(telegramLocale);
+}
+
+function requirementMetadataPolicy(draft: DraftState): JournalMetadataPolicy | null {
+  const rawConfig =
+    draft.requirementVersion?.config ?? draft.journal?.currentRequirement?.config ?? null;
+  const parsed = journalRequirementConfigSchema.safeParse(rawConfig);
+  return parsed.success ? parsed.data.metadata : null;
+}
+
+function statePrompt(locale: Locale, state: string, draft?: DraftState): string {
   const prompts: Record<string, TranslationKey> = {
     AUTHOR_LAST_NAME: 'author.last_name',
     AUTHOR_FIRST_NAME: 'author.first_name',
@@ -130,10 +145,25 @@ function statePrompt(locale: Locale, state: string): string {
   };
   const key = prompts[state];
   if (key) return translate(locale, key);
-  if (state === 'ARTICLE_ABSTRACT')
-    return translate(locale, 'article.annotation', { annotation_limit: '150–300 words' });
-  if (state === 'ARTICLE_KEYWORDS')
-    return translate(locale, 'article.keywords', { keywords_rule: '5–10' });
+  const metadata = draft ? requirementMetadataPolicy(draft) : null;
+  if (state === 'ARTICLE_ABSTRACT') {
+    if (!metadata) return translate(locale, 'error.file_set_incomplete');
+    return translate(locale, 'article.annotation', {
+      annotation_limit: translate(locale, 'article.annotation_range', {
+        min: metadata.abstractMinWords,
+        max: metadata.abstractMaxWords,
+      }),
+    });
+  }
+  if (state === 'ARTICLE_KEYWORDS') {
+    if (!metadata) return translate(locale, 'error.file_set_incomplete');
+    return translate(locale, 'article.keywords', {
+      keywords_rule: translate(locale, 'article.keyword_range', {
+        min: metadata.keywordMinCount,
+        max: metadata.keywordMaxCount,
+      }),
+    });
+  }
   if (state === 'FILE_ARTICLE')
     return translate(locale, 'file.upload_article', { max_article_size: '19 MiB' });
   return translate(locale, 'menu.title');
@@ -468,7 +498,7 @@ async function continueDraft(ctx: Context, api: BotApi, locale: Locale, draft: D
     });
   }
   if (draft.machineState === 'ARTICLE_LANGUAGE') {
-    return ctx.reply(statePrompt(locale, draft.machineState), {
+    return ctx.reply(statePrompt(locale, draft.machineState, draft), {
       reply_markup: new Keyboard()
         .text(translate(locale, 'language.uz'))
         .text(translate(locale, 'language.ru'))
@@ -479,7 +509,7 @@ async function continueDraft(ctx: Context, api: BotApi, locale: Locale, draft: D
         .resized(),
     });
   }
-  return ctx.reply(statePrompt(locale, draft.machineState), {
+  return ctx.reply(statePrompt(locale, draft.machineState, draft), {
     reply_markup: new Keyboard()
       .text(translate(locale, 'common.save_draft'))
       .text(translate(locale, 'common.cancel'))
@@ -1080,7 +1110,7 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
     const locale = user?.locale ?? 'uz-Latn';
     const draft = user?.activeDraft;
     if (!draft || draft.machineState !== 'FILE_ARTICLE')
-      return ctx.reply(statePrompt(locale, draft?.machineState ?? 'MAIN_MENU'));
+      return ctx.reply(statePrompt(locale, draft?.machineState ?? 'MAIN_MENU', draft ?? undefined));
     const policy = currentFilePolicy(draft);
     if (!policy) return ctx.reply(translate(locale, 'error.file_set_incomplete'));
     const document = ctx.message.document;
@@ -1186,6 +1216,33 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
       return ctx.reply(translate(locale, 'validation.orcid'));
     if (text.length > 10_000)
       return ctx.reply(translate(locale, 'validation.required', { field: step.field }));
+    if (step.field === 'abstract') {
+      const metadata = requirementMetadataPolicy(draft);
+      if (!metadata) return ctx.reply(translate(locale, 'error.file_set_incomplete'));
+      const words = text.trim().split(/\s+/u).length;
+      if (words < metadata.abstractMinWords || words > metadata.abstractMaxWords) {
+        return ctx.reply(statePrompt(locale, draft.machineState, draft));
+      }
+    }
+    if (step.field === 'keywords') {
+      const metadata = requirementMetadataPolicy(draft);
+      if (!metadata) return ctx.reply(translate(locale, 'error.file_set_incomplete'));
+      const count = text
+        .split(/[,;\n]/)
+        .map((item) => item.trim())
+        .filter(Boolean).length;
+      if (count < metadata.keywordMinCount || count > metadata.keywordMaxCount) {
+        return ctx.reply(statePrompt(locale, draft.machineState, draft));
+      }
+    }
+    if (step.field === 'coauthors' && text !== '-') {
+      const metadata = requirementMetadataPolicy(draft);
+      if (!metadata) return ctx.reply(translate(locale, 'error.file_set_incomplete'));
+      const count = text.split('\n').filter((line) => line.trim().length > 0).length;
+      if (count > metadata.coauthorMaxCount) {
+        return ctx.reply(translate(locale, 'validation.coauthor_policy'));
+      }
+    }
     let normalizedText = text;
     if (step.field === 'articleLanguage') {
       const languageChoices = [
@@ -1203,11 +1260,16 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
     return continueDraft(ctx, api, locale, updated);
   });
 
-  bot.catch(({ error, ctx }) => {
+  bot.catch(async ({ error, ctx }) => {
     const reference = crypto.randomUUID();
+    let locale = resolveUserLocale(undefined, ctx.from?.language_code);
+    try {
+      locale = resolveUserLocale((await loadUser(ctx, api))?.locale, ctx.from?.language_code);
+    } catch {
+      // The original failure may be an API outage; keep the Telegram locale as a safe fallback.
+    }
     if (error instanceof HmqaApiError) {
-      const locale = normalizeLocale(ctx.from?.language_code);
-      const key = [
+      const key: TranslationKey = [
         'FILE_NOT_READY',
         'REQUIRED_FILE_MISSING',
         'REQUIREMENT_CONFIG_INVALID',
@@ -1215,8 +1277,14 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
         ? 'error.file_set_incomplete'
         : error.code === 'ACTIVE_DRAFT_CONFLICT'
           ? 'profile.active_draft_conflict'
-          : 'error.system';
-      ctx.reply(translate(locale, key, { correlation_id: reference })).catch(() => undefined);
+          : error.code === 'ABSTRACT_WORD_COUNT_INVALID'
+            ? 'validation.abstract_policy'
+            : error.code === 'KEYWORDS_COUNT_INVALID'
+              ? 'validation.keyword_policy'
+              : error.code === 'COAUTHOR_LIMIT'
+                ? 'validation.coauthor_policy'
+                : 'error.system';
+      await ctx.reply(translate(locale, key, { correlation_id: reference })).catch(() => undefined);
       return;
     }
     Sentry.captureException(error, {
@@ -1226,8 +1294,8 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
         updateType: ctx.update.message ? 'message' : 'callback_query',
       },
     });
-    ctx
-      .reply(translate('uz-Latn', 'error.system', { correlation_id: reference }))
+    await ctx
+      .reply(translate(locale, 'error.system', { correlation_id: reference }))
       .catch(() => undefined);
   });
   return bot;

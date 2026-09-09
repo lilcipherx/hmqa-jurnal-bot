@@ -33,7 +33,7 @@ suite('runtime locale persistence boundaries', () => {
         userId,
         firstName: 'Locale',
         lastName: 'Persistence',
-        phoneCipher: encryptSecret('+998901234567', encryptionKey),
+        phoneCipher: encryptSecret('+999000000001', encryptionKey),
         phoneHash: '1'.repeat(64),
         emailCipher: encryptSecret('locale@example.invalid', encryptionKey),
         emailHash: '2'.repeat(64),

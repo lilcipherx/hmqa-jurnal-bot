@@ -18,6 +18,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
         origin: process.env.ADMIN_BASE_URL ?? 'http://localhost:3000',
       },
       cache: 'no-store',
+      signal: AbortSignal.timeout(12_000),
     },
   );
   return new NextResponse(await response.text(), {

@@ -7,6 +7,7 @@ export async function POST(request: Request) {
     headers: { 'content-type': 'application/json' },
     body: await request.text(),
     cache: 'no-store',
+    signal: AbortSignal.timeout(12_000),
   });
   const body = await response.text();
   const result = new NextResponse(body, {

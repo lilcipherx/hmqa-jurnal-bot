@@ -91,6 +91,13 @@ async function seedJournals() {
           maxFiles: 10,
           maxTotalBytes: 50 * 1024 * 1024,
         },
+        metadata: {
+          abstractMinWords: 150,
+          abstractMaxWords: 300,
+          keywordMinCount: 5,
+          keywordMaxCount: 10,
+          coauthorMaxCount: 10,
+        },
         preflight: {
           docx: {
             rulesVersion: 'axborotnomasi-draft-2026-1',
@@ -239,8 +246,8 @@ async function seedPeople() {
       userId: author.id,
       firstName: 'Test',
       lastName: 'Author',
-      phoneCipher: encryptSecret('+998000000000', encryptionKey),
-      phoneHash: createHash('sha256').update('+998000000000').digest('hex'),
+      phoneCipher: encryptSecret('+999000000000', encryptionKey),
+      phoneHash: createHash('sha256').update('+999000000000').digest('hex'),
       emailCipher: encryptSecret('author@example.invalid', encryptionKey),
       emailHash: createHash('sha256').update('author@example.invalid').digest('hex'),
       organization: 'Example Academy',

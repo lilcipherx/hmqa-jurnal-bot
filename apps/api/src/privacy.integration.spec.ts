@@ -133,7 +133,7 @@ suite('data-subject request and legal-hold integration', () => {
           firstName: 'Privacy',
           lastName: 'Author',
           middleName: '-',
-          phone: '+998901234567',
+          phone: '+999000000001',
           email: 'privacy.author@example.invalid',
           organization: 'Example Academy',
           position: 'Researcher',

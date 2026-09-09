@@ -92,6 +92,13 @@ suite('author submission lifecycle', () => {
             maxFiles: 10,
             maxTotalBytes: 50 * 1024 * 1024,
           },
+          metadata: {
+            abstractMinWords: 5,
+            abstractMaxWords: 100,
+            keywordMinCount: 3,
+            keywordMaxCount: 10,
+            coauthorMaxCount: 1,
+          },
           preflight: { docx: { rulesVersion: 'e2e-v1' } },
         },
         configHash: randomUUID().replaceAll('-', '').padEnd(64, '0').slice(0, 64),
@@ -161,7 +168,7 @@ suite('author submission lifecycle', () => {
       firstName: 'E2E',
       lastName: 'Author',
       middleName: 'Verified',
-      phone: '+998901234567',
+      phone: '+999000000001',
       email: 'e2e@example.invalid',
       organization: 'Academy',
       position: 'Researcher',
@@ -265,10 +272,83 @@ suite('author submission lifecycle', () => {
       },
     );
     expect(preview.statusCode).toBe(200);
+
+    const invalidAbstract = await call(
+      'PATCH',
+      `/api/v1/internal/telegram/users/${telegramUserId}/drafts/${draft.id}`,
+      {
+        expectedRowVersion: 4,
+        machineState: 'PREVIEW',
+        expectedInputType: 'CALLBACK',
+        contextPatch: { abstract: 'Short' },
+      },
+    );
+    expect(invalidAbstract.statusCode).toBe(200);
+    const abstractDenied = await call(
+      'POST',
+      `/api/v1/internal/telegram/users/${telegramUserId}/drafts/${draft.id}/submit`,
+      { expectedRowVersion: 5 },
+    );
+    expect(abstractDenied.statusCode).toBe(422);
+    expect(abstractDenied.json()).toMatchObject({ code: 'ABSTRACT_WORD_COUNT_INVALID' });
+
+    const invalidKeywords = await call(
+      'PATCH',
+      `/api/v1/internal/telegram/users/${telegramUserId}/drafts/${draft.id}`,
+      {
+        expectedRowVersion: 5,
+        machineState: 'PREVIEW',
+        expectedInputType: 'CALLBACK',
+        contextPatch: { abstract: context.abstract, keywords: 'law, evidence' },
+      },
+    );
+    expect(invalidKeywords.statusCode).toBe(200);
+    const keywordsDenied = await call(
+      'POST',
+      `/api/v1/internal/telegram/users/${telegramUserId}/drafts/${draft.id}/submit`,
+      { expectedRowVersion: 6 },
+    );
+    expect(keywordsDenied.statusCode).toBe(422);
+    expect(keywordsDenied.json()).toMatchObject({ code: 'KEYWORDS_COUNT_INVALID' });
+
+    const invalidCoauthors = await call(
+      'PATCH',
+      `/api/v1/internal/telegram/users/${telegramUserId}/drafts/${draft.id}`,
+      {
+        expectedRowVersion: 6,
+        machineState: 'PREVIEW',
+        expectedInputType: 'CALLBACK',
+        contextPatch: {
+          keywords: context.keywords,
+          coauthors:
+            'First Author|first@example.invalid|Academy\nSecond Author|second@example.invalid|Academy',
+        },
+      },
+    );
+    expect(invalidCoauthors.statusCode).toBe(200);
+    const coauthorsDenied = await call(
+      'POST',
+      `/api/v1/internal/telegram/users/${telegramUserId}/drafts/${draft.id}/submit`,
+      { expectedRowVersion: 7 },
+    );
+    expect(coauthorsDenied.statusCode).toBe(422);
+    expect(coauthorsDenied.json()).toMatchObject({ code: 'COAUTHOR_LIMIT' });
+
+    const validMetadata = await call(
+      'PATCH',
+      `/api/v1/internal/telegram/users/${telegramUserId}/drafts/${draft.id}`,
+      {
+        expectedRowVersion: 7,
+        machineState: 'PREVIEW',
+        expectedInputType: 'CALLBACK',
+        contextPatch: { coauthors: context.coauthors },
+      },
+    );
+    expect(validMetadata.statusCode).toBe(200);
     const submitted = await call(
       'POST',
       `/api/v1/internal/telegram/users/${telegramUserId}/drafts/${draft.id}/submit`,
-      { expectedRowVersion: 4 },
+      { expectedRowVersion: 8 },
     );
     expect(submitted.statusCode).toBe(201);
     expect(submitted.json()).toMatchObject({ status: 'SUBMITTED' });
@@ -281,7 +361,7 @@ suite('author submission lifecycle', () => {
     const repeatedSubmit = await call(
       'POST',
       `/api/v1/internal/telegram/users/${telegramUserId}/drafts/${draft.id}/submit`,
-      { expectedRowVersion: 4 },
+      { expectedRowVersion: 8 },
     );
     expect(repeatedSubmit.statusCode).toBe(201);
     expect(repeatedSubmit.json()).toMatchObject({

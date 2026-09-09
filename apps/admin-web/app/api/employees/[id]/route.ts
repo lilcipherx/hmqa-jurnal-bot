@@ -20,6 +20,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       },
       body: await request.text(),
       cache: 'no-store',
+      signal: AbortSignal.timeout(12_000),
     },
   );
   return new NextResponse(await response.text(), {

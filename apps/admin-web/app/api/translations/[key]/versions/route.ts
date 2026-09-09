@@ -20,6 +20,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ key
       },
       body: await request.text(),
       cache: 'no-store',
+      signal: AbortSignal.timeout(12_000),
     },
   );
   return new NextResponse(await response.text(), {

@@ -24,6 +24,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       },
       body: request.body,
       duplex: 'half',
+      signal: AbortSignal.timeout(60_000),
     } as RequestInit & { duplex: 'half' },
   );
   return new NextResponse(await response.text(), {
