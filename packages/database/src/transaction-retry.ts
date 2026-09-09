@@ -2,7 +2,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { DatabaseClient } from './client.js';
 import { Prisma } from './generated/client/client.js';
 
-const defaultMaxAttempts = 4;
+// Audit-chain transactions briefly queue on a PostgreSQL advisory lock. Under a
+// legitimate burst, several queued serializable snapshots can be invalidated in
+// succession, so keep the retry window bounded but long enough to drain the burst.
+const defaultMaxAttempts = 7;
 
 export function isSerializableTransactionConflict(error: unknown): boolean {
   return (

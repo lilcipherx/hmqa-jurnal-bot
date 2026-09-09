@@ -16,6 +16,27 @@ describe('serializable transaction retry', () => {
     expect(operation).toHaveBeenCalledTimes(2);
   });
 
+  it('absorbs a bounded burst of serializable conflicts', async () => {
+    vi.useFakeTimers();
+    try {
+      const operation = vi
+        .fn<() => Promise<string>>()
+        .mockRejectedValueOnce({ code: 'P2034' })
+        .mockRejectedValueOnce({ code: 'P2034' })
+        .mockRejectedValueOnce({ code: 'P2034' })
+        .mockRejectedValueOnce({ code: 'P2034' })
+        .mockResolvedValue('committed');
+
+      const result = withSerializableTransactionRetry(operation);
+      await vi.runAllTimersAsync();
+
+      await expect(result).resolves.toBe('committed');
+      expect(operation).toHaveBeenCalledTimes(5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not retry unrelated failures', async () => {
     const error = new Error('DATABASE_UNAVAILABLE');
     const operation = vi.fn<() => Promise<never>>().mockRejectedValue(error);
