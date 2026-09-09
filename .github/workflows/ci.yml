@@ -68,8 +68,6 @@ jobs:
           --health-retries 20
     env:
       NODE_ENV: test
-      DATABASE_URL: postgresql://hmqa:integration-only-password@127.0.0.1:${{ job.services.postgres.ports[5432] }}/hmqa_test?schema=public
-      REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports[6379] }}/15
       REQUIRE_RUNTIME_TESTS: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -81,6 +79,10 @@ jobs:
           node-version: 24.11.1
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+      - name: Configure isolated service endpoints
+        run: |
+          echo 'DATABASE_URL=postgresql://hmqa:integration-only-password@127.0.0.1:${{ job.services.postgres.ports[5432] }}/hmqa_test?schema=public' >> "$GITHUB_ENV"
+          echo 'REDIS_URL=redis://127.0.0.1:${{ job.services.redis.ports[6379] }}/15' >> "$GITHUB_ENV"
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm build
