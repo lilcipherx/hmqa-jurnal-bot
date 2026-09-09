@@ -84,6 +84,12 @@ assert(
   (String(base.services['minio-init']?.command).match(/mc version enable/g) ?? []).length === 2,
   'Production clean and quarantine buckets must both enable object versioning',
 );
+assert(
+  (base.services.backup?.volumes ?? []).some((mount) =>
+    String(mount).endsWith(':/var/lib/hmqa/restic'),
+  ),
+  'Backup must persist a local restic repository outside disposable run containers',
+);
 assert(base.networks?.backend, 'Backend network is missing');
 
 for (const service of [

@@ -16,6 +16,8 @@ Configure `RESTIC_REPOSITORY`, `RESTIC_PASSWORD`, backup S3 credentials, and sou
 docker compose --profile backup run --rm backup
 ```
 
+The backup container always mounts `RESTIC_LOCAL_REPOSITORY_PATH` at `/var/lib/hmqa/restic`; it defaults to the persistent Compose volume `backup-repository`. This prevents a local staging fallback such as `RESTIC_REPOSITORY=/var/lib/hmqa/restic` from being written into the disposable `docker compose run --rm` container. To retain a temporary host-visible staging copy, set `RESTIC_LOCAL_REPOSITORY_PATH` to a pre-created, owner-restricted absolute host directory. This fallback does not satisfy the production off-host requirement.
+
 The command must return zero after `restic check`; its final output includes the manifest and latest tagged snapshot. Record snapshot ID, timestamp, database size/checksum, object count, restic check result, and alert status. Schedule the same container with the platform scheduler; do not keep the only schedule inside the application process.
 
 For a destructive-but-isolated local drill, use `pnpm verify:runtime`. Its test override recreates the source database from zero, seeds it, writes a checksum-addressed evidence object with matching `FileAsset` metadata, stores encrypted restic data in a project-scoped volume, restores into separate `postgres-recovery` and `minio-recovery` volumes, compares critical row counts, verifies DB-to-object size/SHA/SSE consistency, starts `api-recovery`, and checks the restored journal catalog. This is acceptance evidence for the mechanism, not evidence for an Academy off-host repository or production RPO/RTO.

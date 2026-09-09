@@ -215,6 +215,8 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       minio-init: { condition: service_completed_successfully }
+    volumes:
+      - ${RESTIC_LOCAL_REPOSITORY_PATH:-backup-repository}:/var/lib/hmqa/restic
     networks: [backend]
 
 networks:
@@ -228,3 +230,4 @@ volumes:
   clamav-db:
   quarantine-data:
   prometheus-data:
+  backup-repository:
