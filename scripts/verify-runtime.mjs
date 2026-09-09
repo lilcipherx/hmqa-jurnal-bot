@@ -8,6 +8,7 @@ if (!/^hmqa-(?:local-)?verification(?:-[a-z0-9-]+)?$/.test(projectName))
   throw new Error('HMQA_RUNTIME_PROJECT must be an isolated hmqa-verification project name');
 const environmentFile = resolve('.env.test.example');
 const reportDirectory = resolve('.codex-temp', 'runtime-verification');
+const browserResultsDirectory = resolve('.codex-temp', 'browser-results');
 const reportPath = resolve(reportDirectory, 'report.json');
 const keepStack = process.env.KEEP_RUNTIME_STACK === 'true';
 const runtimeProcessEnvironment = {
@@ -138,12 +139,21 @@ function cleanup() {
 
 function captureFailureDiagnostics() {
   const status = tryCompose(['ps', '--all']);
-  const workerLogs = tryCompose(['logs', '--no-color', '--tail', '200', 'worker']);
+  const applicationLogs = tryCompose([
+    'logs',
+    '--no-color',
+    '--tail',
+    '200',
+    'api',
+    'admin-web',
+    'nginx',
+    'worker',
+  ]);
   const diagnostics = {
     composeStatus: redactDiagnostics(`${status.stdout ?? ''}${status.stderr ?? ''}`).slice(-8_000),
-    workerLogs: redactDiagnostics(`${workerLogs.stdout ?? ''}${workerLogs.stderr ?? ''}`).slice(
-      -16_000,
-    ),
+    applicationLogs: redactDiagnostics(
+      `${applicationLogs.stdout ?? ''}${applicationLogs.stderr ?? ''}`,
+    ).slice(-32_000),
   };
   process.stderr.write(
     `\n[runtime] failure diagnostics\n${JSON.stringify(diagnostics, null, 2)}\n`,
@@ -152,6 +162,7 @@ function captureFailureDiagnostics() {
 }
 
 mkdirSync(reportDirectory, { recursive: true });
+mkdirSync(browserResultsDirectory, { recursive: true });
 
 try {
   execute('docker', ['version'], { label: 'Docker engine preflight' });

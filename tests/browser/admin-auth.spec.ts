@@ -89,14 +89,17 @@ test('admin session survives SSR, refresh, protected navigation, and is revoked 
 
   const me = await page.request.get('/api/v1/auth/me');
   expect(me.status()).toBe(200);
+  await expect(page.locator('.app-shell')).toBeVisible();
 
-  await page.reload();
+  const reloadResponse = await page.reload();
+  expect(reloadResponse).not.toBeNull();
+  expect(reloadResponse!.status()).toBe(200);
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.locator('header button')).toBeVisible();
+  await expect(page.locator('.app-shell')).toBeVisible();
 
   await page.locator('a[href="/settings"]').click();
   await expect(page).toHaveURL(/\/settings$/);
-  await expect(page.locator('header button')).toBeVisible();
+  await expect(page.locator('.app-shell')).toBeVisible();
 
   const logoutResponsePromise = page.waitForResponse(
     (response) => new URL(response.url()).pathname === '/api/auth/logout',

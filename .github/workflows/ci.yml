@@ -129,6 +129,7 @@ jobs:
           path: |
             .codex-temp/runtime-verification/report.json
             .codex-temp/test-reports/runtime.json
+            .codex-temp/browser-results
           if-no-files-found: error
           include-hidden-files: true
 
