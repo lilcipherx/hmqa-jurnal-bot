@@ -602,13 +602,26 @@ export async function createApp({
         where: { tokenHash: hashOpaqueToken(body.token) },
         include: { employee: true },
       });
-      if (
-        !invitation ||
-        invitation.acceptedAt ||
-        invitation.revokedAt ||
-        invitation.expiresAt <= new Date() ||
-        !invitation.employee.totpSecretCipher
-      )
+      if (!invitation || invitation.revokedAt || !invitation.employee.totpSecretCipher)
+        return reply.code(404).send({
+          code: 'INVITATION_INVALID',
+          messageKey: 'error.stale_action',
+          correlationId: request.id,
+        });
+      if (invitation.acceptedAt) {
+        if (
+          invitation.employee.status === 'ACTIVE' &&
+          invitation.employee.passwordHash &&
+          invitation.employee.totpEnabled
+        )
+          return reply.code(204).send();
+        return reply.code(404).send({
+          code: 'INVITATION_INVALID',
+          messageKey: 'error.stale_action',
+          correlationId: request.id,
+        });
+      }
+      if (invitation.expiresAt <= new Date())
         return reply.code(404).send({
           code: 'INVITATION_INVALID',
           messageKey: 'error.stale_action',
@@ -664,7 +677,7 @@ export async function createApp({
           correlationId: request.id,
         });
       const passwordHash = await hashPassword(body.password);
-      await database.$transaction(async (tx) => {
+      const activated = await database.$transaction(async (tx) => {
         const accepted = await tx.staffInvitation.updateMany({
           where: {
             id: invitation.id,
@@ -674,7 +687,7 @@ export async function createApp({
           },
           data: { acceptedAt: new Date() },
         });
-        if (accepted.count !== 1) throw new Error('INVITATION_ALREADY_USED');
+        if (accepted.count !== 1) return false;
         await tx.employee.update({
           where: { id: invitation.employeeId },
           data: {
@@ -715,7 +728,26 @@ export async function createApp({
             eventHash,
           },
         });
+        return true;
       });
+      if (!activated) {
+        const current = await database.staffInvitation.findUnique({
+          where: { id: invitation.id },
+          include: { employee: true },
+        });
+        if (
+          !current?.acceptedAt ||
+          current.revokedAt ||
+          current.employee.status !== 'ACTIVE' ||
+          !current.employee.passwordHash ||
+          !current.employee.totpEnabled
+        )
+          return reply.code(404).send({
+            code: 'INVITATION_INVALID',
+            messageKey: 'error.stale_action',
+            correlationId: request.id,
+          });
+      }
       return reply.code(204).send();
     },
   );

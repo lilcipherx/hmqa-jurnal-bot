@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { loadConfig } from '@hmqa/config';
 import { createPrismaClient } from '@hmqa/database';
-import { encryptSecret, generateTotpCode, generateTotpSecret, hashPassword } from '@hmqa/security';
+import {
+  encryptSecret,
+  generateOpaqueToken,
+  generateTotpCode,
+  generateTotpSecret,
+  hashOpaqueToken,
+  hashPassword,
+} from '@hmqa/security';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
@@ -15,6 +22,7 @@ const encryptionKey = 'auth-security-integration-key';
 const password = 'Integration-only-password-2026!';
 const identities = new Map<string, { secret: string; employeeId: string }>();
 let app: Awaited<ReturnType<typeof createApp>>;
+let invitation: { employeeId: string; secret: string; token: string };
 
 suite('staff authentication security', () => {
   beforeAll(async () => {
@@ -33,6 +41,29 @@ suite('staff authentication security', () => {
       });
       identities.set(name, { secret, employeeId: employee.id });
     }
+    const invitationSecret = generateTotpSecret();
+    const invitationToken = generateOpaqueToken();
+    const invitedEmployee = await database!.employee.create({
+      data: {
+        email: `invited-${randomUUID()}@example.invalid`,
+        displayName: 'Integration invitation',
+        status: 'INVITED',
+        totpSecretCipher: encryptSecret(invitationSecret, encryptionKey),
+      },
+    });
+    await database!.staffInvitation.create({
+      data: {
+        employeeId: invitedEmployee.id,
+        tokenHash: hashOpaqueToken(invitationToken),
+        createdById: identities.get('valid')!.employeeId,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
+    });
+    invitation = {
+      employeeId: invitedEmployee.id,
+      secret: invitationSecret,
+      token: invitationToken,
+    };
     const config = loadConfig({
       NODE_ENV: 'test',
       APP_BASE_URL: 'http://localhost:3001',
@@ -89,6 +120,48 @@ suite('staff authentication security', () => {
     expect(response.json()).toMatchObject({ csrfToken: expect.any(String) });
     expect(response.body).not.toContain(password);
     expect(response.body).not.toContain(identities.get('valid')!.secret);
+  });
+
+  it('activates an invitation exactly once and returns success for concurrent safe retries', async () => {
+    const payload = {
+      token: invitation.token,
+      password,
+      totp: generateTotpCode(invitation.secret),
+    };
+    const responses = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/auth/invitations/accept',
+          payload,
+        }),
+      ),
+    );
+    expect(responses.map((response) => response.statusCode)).toEqual([204, 204]);
+
+    const retry = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/invitations/accept',
+      payload,
+    });
+    expect(retry.statusCode).toBe(204);
+
+    const employee = await database!.employee.findUniqueOrThrow({
+      where: { id: invitation.employeeId },
+    });
+    expect(employee).toMatchObject({
+      status: 'ACTIVE',
+      totpEnabled: true,
+      passwordHash: expect.any(String),
+    });
+    expect(
+      await database!.auditLog.count({
+        where: {
+          actorId: invitation.employeeId,
+          action: 'employee.invitation.accepted',
+        },
+      }),
+    ).toBe(1);
   });
 
   it('locks an employee after five failed passwords and denies correct credentials while locked', async () => {

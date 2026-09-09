@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { localizedResponseError } from '../../lib/client-error';
 
 export function InviteForm({ token, labels }: { token: string; labels: Record<string, string> }) {
@@ -11,6 +11,8 @@ export function InviteForm({ token, labels }: { token: string; labels: Record<st
   } | null>(null);
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
   useEffect(() => {
     void fetch('/api/invitations/inspect', {
       method: 'POST',
@@ -29,16 +31,27 @@ export function InviteForm({ token, labels }: { token: string; labels: Record<st
   }, [labels.invalid, token]);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting.current) return;
+    submitting.current = true;
+    setBusy(true);
     setError('');
     const form = new FormData(event.currentTarget);
-    const response = await fetch('/api/invitations/accept', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token, password: form.get('password'), totp: form.get('totp') }),
-    });
-    if (response.ok) setDone(true);
-    else {
+    try {
+      const response = await fetch('/api/invitations/accept', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token, password: form.get('password'), totp: form.get('totp') }),
+      });
+      if (response.ok) {
+        setDone(true);
+        return;
+      }
       setError(await localizedResponseError(response));
+    } catch {
+      setError(labels.invalid ?? '');
+    } finally {
+      submitting.current = false;
+      setBusy(false);
     }
   }
   if (done)
@@ -51,7 +64,7 @@ export function InviteForm({ token, labels }: { token: string; labels: Record<st
       </div>
     );
   return (
-    <form className="panel form-stack" onSubmit={(event) => void submit(event)}>
+    <form className="panel form-stack" onSubmit={(event) => void submit(event)} aria-busy={busy}>
       <h1>{labels.heading}</h1>
       {details ? (
         <p>
@@ -88,8 +101,8 @@ export function InviteForm({ token, labels }: { token: string; labels: Record<st
       <div role="alert" className={error ? 'error' : 'sr-only'}>
         {error}
       </div>
-      <button className="button" disabled={!details}>
-        {labels.submit}
+      <button className="button" type="submit" disabled={!details || busy}>
+        {busy ? `${labels.submit}…` : labels.submit}
       </button>
     </form>
   );
