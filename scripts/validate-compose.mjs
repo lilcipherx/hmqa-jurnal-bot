@@ -70,16 +70,27 @@ assert(
 );
 assert(base.networks?.backend, 'Backend network is missing');
 
-for (const service of ['telegram-stub', 'runtime-tests', 'postgres-recovery', 'minio-recovery']) {
+for (const service of [
+  'clamav-signature-init',
+  'telegram-stub',
+  'runtime-tests',
+  'postgres-recovery',
+  'minio-recovery',
+]) {
   assert(Boolean(test?.services?.[service]), `Missing verification-only service: ${service}`);
 }
 assert(test.services['telegram-stub']?.build?.target === 'verification', 'Telegram fixture target');
 assert(test.services['runtime-tests']?.build?.target === 'verification', 'Runtime test target');
 assert(
-  test.services.clamav?.volumes?.some((volume) =>
-    String(volume).includes('tests/fixtures/hmqa-eicar.ndb'),
+  test.services['clamav-signature-init']?.volumes?.some((volume) =>
+    String(volume).includes('tests/fixtures'),
   ),
-  'Runtime ClamAV must load the deterministic EICAR signature fixture',
+  'Runtime ClamAV must stage the deterministic EICAR signature fixture',
+);
+assert(
+  test.services.clamav?.depends_on?.['clamav-signature-init']?.condition ===
+    'service_completed_successfully',
+  'Runtime ClamAV must start only after its signature fixture is staged',
 );
 assert(
   Boolean(test.services['minio-recovery']?.environment?.MINIO_KMS_SECRET_KEY),

@@ -96,25 +96,26 @@ for (const line of objectLines) {
   if (path) auditPath(path, 'history');
 }
 
-const objectTypes = spawnSync('git', ['cat-file', '--batch-check=%(objecttype)'], {
+const objectTypes = spawnSync('git', ['cat-file', '--batch-check=%(objectname) %(objecttype)'], {
   cwd: root,
   input: `${objectIds.join('\n')}\n`,
   encoding: 'utf8',
   maxBuffer: 64 * 1024 * 1024,
 });
-if (objectTypes.status !== 0) throw new Error(objectTypes.stderr || 'git cat-file failed');
-const auditedBlobCount = objectTypes.stdout.split(/\r?\n/).filter((type) => type === 'blob').length;
-
-const commits = git(['rev-list', '--all']).split(/\r?\n/).filter(Boolean);
-const historyText = spawnSync('git', ['grep', '-I', '-n', '-e', '.', ...commits], {
-  cwd: root,
-  encoding: 'utf8',
-  maxBuffer: 64 * 1024 * 1024,
-});
-if (historyText.status !== 0 && historyText.status !== 1) {
-  throw new Error(historyText.stderr || 'git grep history scan failed');
+if (objectTypes.status !== 0)
+  throw new Error(objectTypes.error?.message || objectTypes.stderr || 'git cat-file failed');
+const blobIds = objectTypes.stdout
+  .split(/\r?\n/)
+  .filter(Boolean)
+  .flatMap((line) => {
+    const [objectId, type] = line.split(' ');
+    return type === 'blob' && objectId ? [objectId] : [];
+  });
+const auditedBlobCount = blobIds.length;
+for (const objectId of blobIds) {
+  const content = git(['cat-file', 'blob', objectId], 'buffer').toString('utf8');
+  auditText(content, `reachable blob ${objectId}`);
 }
-auditText(historyText.stdout, 'reachable history');
 
 if (findings.length > 0) {
   console.error([...new Set(findings)].join('\n'));

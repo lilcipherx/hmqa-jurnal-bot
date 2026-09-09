@@ -1,7 +1,17 @@
 services:
-  clamav:
+  clamav-signature-init:
+    image: clamav/clamav:1.4.3
+    entrypoint: ['/bin/sh', '-ec']
+    command: ['cp /fixture/hmqa-eicar.ndb /var/lib/clamav/hmqa-eicar.ndb']
     volumes:
-      - ./tests/fixtures/hmqa-eicar.ndb:/var/lib/clamav/hmqa-eicar.ndb:ro
+      - clamav-db:/var/lib/clamav
+      - ./tests/fixtures:/fixture:ro
+    restart: 'no'
+    networks: [backend]
+
+  clamav:
+    depends_on:
+      clamav-signature-init: { condition: service_completed_successfully }
 
   telegram-stub:
     build:
