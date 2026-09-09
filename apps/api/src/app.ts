@@ -785,7 +785,7 @@ export async function createApp({
       const canReadSubmissions = hasPermission(actor.role, 'submission:read:journal');
       const scope = canReadSubmissions
         ? { journalId: { in: [...actor.journalIds] }, deletedAt: null }
-        : { id: '__none__' };
+        : { id: { in: [] as string[] } };
       const [total, pendingTechnical, underReview, revisions, published, failedNotifications] =
         await Promise.all([
           database.submission.count({ where: scope }),

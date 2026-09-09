@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { loadConfig } from '@hmqa/config';
 import { createPrismaClient } from '@hmqa/database';
-import { roles, type Role } from '@hmqa/domain';
+import { hasPermission, roles, type Role } from '@hmqa/domain';
 import { hashOpaqueToken } from '@hmqa/security';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -242,6 +242,26 @@ suite('exhaustive backend RBAC boundaries', () => {
           headers: headersFor(role),
         });
         expect(response.statusCode, `${role}:${resource}`).toBe(expected[role][index]);
+      }
+    }
+  });
+
+  it('serves the dashboard safely to staff roles without submission access', async () => {
+    for (const role of roles) {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/admin/dashboard',
+        headers: headersFor(role),
+      });
+      expect(response.statusCode, role).toBe(200);
+      if (!hasPermission(role, 'submission:read:journal')) {
+        expect(response.json()).toMatchObject({
+          total: 0,
+          pendingTechnical: 0,
+          underReview: 0,
+          revisions: 0,
+          published: 0,
+        });
       }
     }
   });
