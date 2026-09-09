@@ -10,8 +10,25 @@ export default defineConfig({
   reporter: 'line',
   use: {
     baseURL: process.env.ADMIN_BROWSER_BASE_URL ?? 'http://127.0.0.1:8080',
-    browserName: 'chromium',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
+  projects: [
+    {
+      name: 'firefox-critical',
+      testMatch: /admin-cross-browser\.spec\.ts/,
+      use: { browserName: 'firefox' },
+    },
+    {
+      name: 'webkit-critical',
+      testMatch: /admin-cross-browser\.spec\.ts/,
+      use: { browserName: 'webkit' },
+    },
+    {
+      name: 'chromium-full',
+      dependencies: ['firefox-critical', 'webkit-critical'],
+      testMatch: /admin-auth\.spec\.ts/,
+      use: { browserName: 'chromium' },
+    },
+  ],
 });
