@@ -17,7 +17,7 @@ CREATE TABLE "staff_totp_enrollments" (
 CREATE UNIQUE INDEX "staff_totp_enrollments_token_hash_key"
 ON "staff_totp_enrollments"("token_hash");
 
-CREATE INDEX "staff_totp_enrollments_employee_id_completed_at_revoked_at_expires_at_idx"
+CREATE INDEX "staff_totp_enrollment_active_idx"
 ON "staff_totp_enrollments"("employee_id", "completed_at", "revoked_at", "expires_at");
 
 ALTER TABLE "staff_totp_enrollments"

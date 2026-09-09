@@ -697,7 +697,7 @@ model StaffTotpEnrollment {
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
 
-  @@index([employeeId, completedAt, revokedAt, expiresAt])
+  @@index([employeeId, completedAt, revokedAt, expiresAt], map: "staff_totp_enrollment_active_idx")
   @@map("staff_totp_enrollments")
 }
 
