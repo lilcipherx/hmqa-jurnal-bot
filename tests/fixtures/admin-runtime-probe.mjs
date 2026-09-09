@@ -79,19 +79,57 @@ async function apiGet(session, path) {
   );
 }
 
-function renderedTextAndLabels(html) {
-  const withoutExecutableContent = html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<(?:noscript|template)\b[^>]*>[\s\S]*?<\/(?:noscript|template)>/gi, ' ');
-  const labels = [
-    ...withoutExecutableContent.matchAll(
-      /\b(?:aria-label|alt|title|placeholder)=(?:"([^"]*)"|'([^']*)')/gi,
-    ),
-  ]
-    .map((match) => match[1] ?? match[2] ?? '')
-    .join(' ');
-  return `${withoutExecutableContent.replace(/<[^>]+>/g, ' ')} ${labels}`;
+function findTagEnd(html, start) {
+  let quote;
+  for (let index = start; index < html.length; index += 1) {
+    const character = html[index];
+    if (quote) {
+      if (character === quote) quote = undefined;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === '>') {
+      return index;
+    }
+  }
+  return html.length - 1;
+}
+
+function findTagStart(lowerHtml, tag, start, closing = false) {
+  const prefix = `<${closing ? '/' : ''}${tag}`;
+  let index = lowerHtml.indexOf(prefix, start);
+  while (index >= 0) {
+    const boundary = lowerHtml[index + prefix.length];
+    if (
+      boundary === '>' ||
+      boundary === '/' ||
+      (boundary !== undefined && boundary.charCodeAt(0) <= 32)
+    ) {
+      return index;
+    }
+    index = lowerHtml.indexOf(prefix, index + prefix.length);
+  }
+  return -1;
+}
+
+function renderedMarkup(html) {
+  const lowerHtml = html.toLowerCase();
+  const ignoredTags = ['script', 'style', 'noscript', 'template'];
+  let rendered = '';
+  let cursor = 0;
+  while (cursor < html.length) {
+    const candidate = ignoredTags
+      .map((tag) => ({ tag, index: findTagStart(lowerHtml, tag, cursor) }))
+      .filter(({ index }) => index >= 0)
+      .sort((left, right) => left.index - right.index)[0];
+    if (!candidate) return rendered + html.slice(cursor);
+
+    rendered += html.slice(cursor, candidate.index);
+    const openingEnd = findTagEnd(html, candidate.index);
+    const closingStart = findTagStart(lowerHtml, candidate.tag, openingEnd + 1, true);
+    if (closingStart < 0) return rendered;
+    cursor = findTagEnd(html, closingStart) + 1;
+  }
+  return rendered;
 }
 
 async function webGet(session, path, locale = 'en', { allowTranslationKeys = false } = {}) {
@@ -111,9 +149,8 @@ async function webGet(session, path, locale = 'en', { allowTranslationKeys = fal
     throw new Error(`WEB ${path} (${locale}) allows unsafe-inline scripts`);
   }
   const html = await response.text();
-  const rawKey = renderedTextAndLabels(html)
-    .match(/\b[a-z][a-z0-9_-]*(?:\.[a-z0-9_.-]+)+\b/g)
-    ?.find((candidate) => translationKeys.has(candidate));
+  const rendered = renderedMarkup(html);
+  const rawKey = [...translationKeys].find((candidate) => rendered.includes(candidate));
   if (rawKey && !allowTranslationKeys)
     throw new Error(`WEB ${path} (${locale}) leaked raw translation key ${rawKey}`);
   return html;
