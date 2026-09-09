@@ -1,5 +1,15 @@
 # Administrator guide
 
+## Initial administrator bootstrap
+
+Never run the development seed in staging or production. After forward migrations on a clean environment, create the first administrator through an interactive one-time invitation:
+
+```bash
+docker compose --env-file .env.production run --rm -it api pnpm --filter @hmqa/database bootstrap:admin
+```
+
+The command interactively asks for the approved email and display name, creates canonical RBAC records and an audited `INVITED` administrator, and prints a single-use 24-hour invitation URL. It does not accept or print a password. Open the URL over trusted HTTPS, enroll the displayed TOTP secret in the owner's authenticator, set a strong unique password, enter the current code, and complete activation. The bootstrap refuses to create a second initial administrator.
+
 ## Access and roles
 
 Staff accounts are invitation-only. The one-time invitation expires after 24 hours and displays the TOTP enrollment secret only to the invitee. A password must contain at least 14 characters. Five failed logins trigger a 15-minute lock. Sessions have idle and absolute expiry; sensitive decisions require a recent TOTP-backed step-up window.

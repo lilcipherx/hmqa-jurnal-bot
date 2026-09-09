@@ -17,6 +17,7 @@ Sensitive fields include author contact data, manuscripts, review identities/com
 - durable data-subject request workflow, backend privacy permissions, recent-2FA legal holds, erasure execution gates, and non-destructive retention defaults;
 - serializable workflow transaction writes status, history, notification outbox, and hash-chained audit together;
 - notification claim leases, deterministic queue IDs, exponential retry, terminal dead-letter state, and audited replay generations;
+- password-authenticated Redis on the private backend network, with the credential supplied independently from the application connection URL;
 - Sentry configured without default PII, Prometheus metrics, health probes, alerts, secret scanning, dependency audit, SHA-pinned CI actions, and CodeQL. The AWS SDK packages are kept in lockstep; the 2026 `fast-xml-parser` transitive advisories are removed from the locked graph and the moderate-level audit passes.
 - public-source history scanning covers forbidden paths and every reachable Git blob; CI executes untrusted fork code only on disposable hosted runners with read-only repository permissions and no production secrets.
 

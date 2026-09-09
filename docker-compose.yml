@@ -28,7 +28,14 @@ services:
   redis:
     image: redis:8.2.1-alpine
     restart: unless-stopped
-    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command:
+      [
+        '/bin/sh',
+        '-ec',
+        'exec redis-server --appendonly yes --maxmemory-policy noeviction --requirepass "$$REDISCLI_AUTH"',
+      ]
     volumes:
       - redis-data:/data
     healthcheck:

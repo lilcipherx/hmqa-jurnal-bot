@@ -42,6 +42,7 @@ const diagnosticSecrets = [
   '123456:test-only-token',
   'test-only-webhook-secret-32-characters',
   'test-only-postgres-password',
+  'test-only-redis-password-32-characters',
   'test-only-minio-secret-key',
   'test-only-service-secret-32-characters',
   'test-only-session-secret-32-characters',

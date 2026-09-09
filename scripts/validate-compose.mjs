@@ -67,6 +67,11 @@ assert(
 );
 assert(base.services.worker?.cap_drop?.includes('ALL'), 'Worker must drop Linux capabilities');
 assert(
+  Boolean(base.services.redis?.environment?.REDISCLI_AUTH) &&
+    String(base.services.redis?.command).includes('--requirepass'),
+  'Redis must require authenticated clients',
+);
+assert(
   Boolean(base.services.minio?.environment?.MINIO_KMS_SECRET_KEY),
   'MinIO must require a KMS secret key for server-side encryption',
 );

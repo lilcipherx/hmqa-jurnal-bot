@@ -124,6 +124,19 @@ const schema = z
           message: 'must be separate from the clean-file bucket',
         });
       }
+      let redisPassword = '';
+      try {
+        redisPassword = new URL(value.REDIS_URL).password;
+      } catch {
+        // The base URL validator reports malformed values; keep refinement fail-safe.
+      }
+      if (!redisPassword) {
+        context.addIssue({
+          code: 'custom',
+          path: ['REDIS_URL'],
+          message: 'must include a Redis password outside development/test',
+        });
+      }
     }
   });
 
