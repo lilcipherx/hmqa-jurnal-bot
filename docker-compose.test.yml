@@ -1,4 +1,8 @@
 services:
+  clamav:
+    volumes:
+      - ./tests/fixtures/hmqa-eicar.ndb:/var/lib/clamav/hmqa-eicar.ndb:ro
+
   telegram-stub:
     build:
       context: .

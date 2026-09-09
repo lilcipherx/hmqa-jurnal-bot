@@ -76,6 +76,12 @@ for (const service of ['telegram-stub', 'runtime-tests', 'postgres-recovery', 'm
 assert(test.services['telegram-stub']?.build?.target === 'verification', 'Telegram fixture target');
 assert(test.services['runtime-tests']?.build?.target === 'verification', 'Runtime test target');
 assert(
+  test.services.clamav?.volumes?.some((volume) =>
+    String(volume).includes('tests/fixtures/hmqa-eicar.ndb'),
+  ),
+  'Runtime ClamAV must load the deterministic EICAR signature fixture',
+);
+assert(
   Boolean(test.services['minio-recovery']?.environment?.MINIO_KMS_SECRET_KEY),
   'Recovery MinIO must enable server-side encryption',
 );

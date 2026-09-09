@@ -1,6 +1,6 @@
 import { createWriteStream } from 'node:fs';
 import { chmod, mkdir, rm, stat, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
+import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 import {
   DeleteObjectsCommand,
@@ -240,7 +240,11 @@ describe('real file-security runtime', () => {
   });
 
   it('records antivirus timeouts as retryable and keeps the source in quarantine', async () => {
-    const server = createServer(() => undefined);
+    const connections = new Set<Socket>();
+    const server = createServer((socket) => {
+      connections.add(socket);
+      socket.once('close', () => connections.delete(socket));
+    });
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
       server.listen(0, '127.0.0.1', resolve);
@@ -263,6 +267,7 @@ describe('real file-security runtime', () => {
         objectKey: null,
       });
     } finally {
+      for (const socket of connections) socket.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });

@@ -34,7 +34,7 @@ Never put production secrets in Git, images, Compose YAML, seed data, issue comm
 - Run ClamAV definition freshness monitoring and periodic adversarial upload tests.
 - Restrict direct database users: application roles must not own the database or receive arbitrary audit-table DELETE/UPDATE privileges.
 
-The tracked synthetic runtime configuration is never a production secret source. Its values, Telegram API server, EICAR construction, and local recovery volumes exist only under `.env.test.example`/`docker-compose.test.yml` and are labelled `DEV/TEST ONLY — REQUIRES ACADEMY APPROVAL`. The default Compose file still requires an operator-provided `.env` and real Telegram API endpoint.
+The tracked synthetic runtime configuration is never a production secret source. Its values, Telegram API server, deterministic ClamAV EICAR test signature, and local recovery volumes exist only under `.env.test.example`/`docker-compose.test.yml`/`tests/fixtures` and are test-only. The EICAR signature contains no live malware and is mounted only by the acceptance override. The default Compose file still requires an operator-provided `.env` and real Telegram API endpoint.
 
 The default Docker target is assembled only from built application/package artifacts, package metadata, and forward migrations; it does not copy repository tests or `.env*` files. The Compose acceptance override explicitly selects the separate `verification` target for runtime fixtures.
 
