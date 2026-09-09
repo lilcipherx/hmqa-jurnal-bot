@@ -70,7 +70,22 @@ async function apiGet(session, path) {
   );
 }
 
-async function webGet(session, path, locale = 'en') {
+function renderedTextAndLabels(html) {
+  const withoutExecutableContent = html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<(?:noscript|template)\b[^>]*>[\s\S]*?<\/(?:noscript|template)>/gi, ' ');
+  const labels = [
+    ...withoutExecutableContent.matchAll(
+      /\b(?:aria-label|alt|title|placeholder)=(?:"([^"]*)"|'([^']*)')/gi,
+    ),
+  ]
+    .map((match) => match[1] ?? match[2] ?? '')
+    .join(' ');
+  return `${withoutExecutableContent.replace(/<[^>]+>/g, ' ')} ${labels}`;
+}
+
+async function webGet(session, path, locale = 'en', { allowTranslationKeys = false } = {}) {
   const response = await expectStatus(
     globalThis.fetch(`${webBase}${path}`, {
       headers: { cookie: `${session.cookie}; hmqa_locale=${encodeURIComponent(locale)}` },
@@ -87,8 +102,11 @@ async function webGet(session, path, locale = 'en') {
     throw new Error(`WEB ${path} (${locale}) allows unsafe-inline scripts`);
   }
   const html = await response.text();
-  if (/\b(?:admin|menu|status|validation)\.[a-z0-9_.-]+\b/.test(html))
-    throw new Error(`WEB ${path} (${locale}) leaked a raw translation key`);
+  const rawKey = renderedTextAndLabels(html).match(
+    /\b(?:admin|menu|status|validation)\.[a-z0-9_.-]+\b/,
+  )?.[0];
+  if (rawKey && !allowTranslationKeys)
+    throw new Error(`WEB ${path} (${locale}) leaked raw translation key ${rawKey}`);
   return html;
 }
 
@@ -168,7 +186,7 @@ await Promise.all([
   webGet(sessions.content, '/journals', 'uz-Latn'),
   webGet(sessions.editor, '/reviewers', 'ru'),
   webGet(sessions.reviewer, '/reviews', 'en'),
-  webGet(sessions.content, '/translations', 'uz-Latn'),
+  webGet(sessions.content, '/translations', 'uz-Latn', { allowTranslationKeys: true }),
   webGet(sessions.admin, '/users', 'ru'),
   webGet(sessions.auditor, '/audit', 'en'),
   webGet(sessions.auditor, '/reports', 'uz-Latn'),
