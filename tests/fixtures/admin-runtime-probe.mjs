@@ -234,7 +234,8 @@ await Promise.all([
   webGet(sessions.reviewer, '/reviews', 'en'),
   webGet(sessions.content, '/translations', 'uz-Latn', { allowTranslationKeys: true }),
   webGet(sessions.admin, '/users', 'ru'),
-  webGet(sessions.auditor, '/audit', 'en'),
+  // Audit action identifiers are stable domain codes and may intentionally equal i18n keys.
+  webGet(sessions.auditor, '/audit', 'en', { allowTranslationKeys: true }),
   webGet(sessions.auditor, '/reports', 'uz-Latn'),
   webGet(sessions.admin, '/settings', 'ru'),
   webGet(sessions.admin, '/notifications', 'en'),
