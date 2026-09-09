@@ -82,6 +82,7 @@ services:
         mc encrypt set sse-s3 "local/$${S3_BUCKET}"
         mc mb --ignore-existing "local/$${S3_QUARANTINE_BUCKET}"
         mc anonymous set none "local/$${S3_QUARANTINE_BUCKET}"
+        mc version enable "local/$${S3_QUARANTINE_BUCKET}"
         mc encrypt set sse-s3 "local/$${S3_QUARANTINE_BUCKET}"
     networks: [backend]
 

@@ -79,6 +79,10 @@ assert(
   String(base.services['minio-init']?.command).includes('mc encrypt set sse-s3'),
   'Production MinIO buckets must enforce default server-side encryption',
 );
+assert(
+  (String(base.services['minio-init']?.command).match(/mc version enable/g) ?? []).length === 2,
+  'Production clean and quarantine buckets must both enable object versioning',
+);
 assert(base.networks?.backend, 'Backend network is missing');
 
 for (const service of [

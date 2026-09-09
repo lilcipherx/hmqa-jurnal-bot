@@ -115,6 +115,7 @@ services:
         mc encrypt set sse-s3 recovery/hmqa-test-recovery
         mc mb --ignore-existing recovery/hmqa-test-recovery-quarantine
         mc anonymous set none recovery/hmqa-test-recovery-quarantine
+        mc version enable recovery/hmqa-test-recovery-quarantine
         mc encrypt set sse-s3 recovery/hmqa-test-recovery-quarantine
     networks: [backend]
 
