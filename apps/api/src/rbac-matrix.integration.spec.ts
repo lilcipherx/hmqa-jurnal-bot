@@ -59,8 +59,12 @@ suite('exhaustive backend RBAC boundaries', () => {
     }
 
     const [journalA, journalB, owner] = await Promise.all([
-      database!.journal.create({ data: { code: `RA${suffix}`, mode: 'NATIVE', active: true } }),
-      database!.journal.create({ data: { code: `RB${suffix}`, mode: 'NATIVE', active: true } }),
+      database!.journal.create({
+        data: { code: `RA${suffix}`, mode: 'NATIVE', active: true, fourEyesRequired: false },
+      }),
+      database!.journal.create({
+        data: { code: `RB${suffix}`, mode: 'NATIVE', active: true, fourEyesRequired: false },
+      }),
       database!.user.create({
         data: {
           telegramUserId: BigInt(`6${Date.now()}`),
@@ -80,6 +84,7 @@ suite('exhaustive backend RBAC boundaries', () => {
         },
       ],
       limits: { maxBytes: 1024 * 1024, maxFiles: 2, maxTotalBytes: 2 * 1024 * 1024 },
+      preflight: { docx: { rulesVersion: 'rbac-integration-v1', requiredMarkers: [] } },
       workflow: {
         reviewModel: 'NO_EXTERNAL_REVIEW',
         requiredReviewerCount: 0,

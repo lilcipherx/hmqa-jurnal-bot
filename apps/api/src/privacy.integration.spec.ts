@@ -172,7 +172,7 @@ suite('data-subject request and legal-hold integration', () => {
     });
     expect(synced.statusCode).toBe(200);
     expect(synced.json()).toMatchObject({
-      profile: { email: 'pr************@example.invalid', phone: '+99********67' },
+      profile: { email: 'pr************@example.invalid', phone: '+99********01' },
     });
   });
 
