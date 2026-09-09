@@ -5,8 +5,9 @@ import {
   type SubmissionStatus as DomainSubmissionStatus,
   type TransitionGuardContext,
 } from '@hmqa/domain';
-import { Prisma } from './generated/client/client.js';
+import type { Prisma } from './generated/client/client.js';
 import type { DatabaseClient } from './client.js';
+import { serializableTransactionWithRetry } from './transaction-retry.js';
 
 export interface TransitionSubmissionInput {
   readonly submissionId: string;
@@ -49,7 +50,8 @@ export async function transitionSubmission(
   database: DatabaseClient,
   input: TransitionSubmissionInput,
 ) {
-  return database.$transaction(
+  return serializableTransactionWithRetry(
+    database,
     async (tx) => {
       const submission = await tx.submission.findUnique({
         where: { id: input.submissionId },
@@ -214,10 +216,6 @@ export async function transitionSubmission(
         auditId: audit.id,
       };
     },
-    {
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      maxWait: 5_000,
-      timeout: 10_000,
-    },
+    { maxWait: 5_000, timeout: 10_000 },
   );
 }

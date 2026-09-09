@@ -18,7 +18,8 @@ import {
   transitionRequestSchema,
 } from '@hmqa/contracts';
 import type { AppConfig } from '@hmqa/config';
-import { Prisma, transitionSubmission, type DatabaseClient } from '@hmqa/database';
+import { serializableTransactionWithRetry, transitionSubmission } from '@hmqa/database';
+import type { DatabaseClient, Prisma } from '@hmqa/database';
 import {
   TransitionDeniedError,
   canTransitionPrivacyRequest,
@@ -1120,7 +1121,8 @@ export async function createApp({
           .code(404)
           .send({ code: 'NOT_FOUND', messageKey: 'error.system', correlationId: request.id });
       const userLocale = user.locale;
-      const result = await database.$transaction(
+      const result = await serializableTransactionWithRetry(
+        database,
         async (tx) => {
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${user.id}, 0))`;
           const existing = await tx.dataSubjectRequest.findFirst({
@@ -1165,7 +1167,7 @@ export async function createApp({
           });
           return { item, created: true };
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        {},
       );
       return reply.code(result.created ? 201 : 200).send({
         id: result.item.id,
@@ -1428,7 +1430,8 @@ export async function createApp({
         return reply
           .code(404)
           .send({ code: 'NOT_FOUND', messageKey: 'error.system', correlationId: request.id });
-      const result = await database.$transaction(
+      const result = await serializableTransactionWithRetry(
+        database,
         async (tx) => {
           const draft = await tx.draft.findFirst({
             where: { id: params.draftId, userId: user.id, deletedAt: null },
@@ -1516,7 +1519,7 @@ export async function createApp({
           });
           return { id: updated.id, updatedAt: updated.updatedAt };
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        {},
       );
       if (!result)
         return reply.code(409).send({
@@ -1562,7 +1565,8 @@ export async function createApp({
           .code(404)
           .send({ code: 'NOT_FOUND', messageKey: 'error.system', correlationId: request.id });
       const sourceKey = `telegram:${body.fileUniqueId}`;
-      const result = await database.$transaction(
+      const result = await serializableTransactionWithRetry(
+        database,
         async (tx) => {
           const draft = await tx.draft.findFirst({
             where: { id: params.draftId, userId: user.id, deletedAt: null },
@@ -1666,7 +1670,7 @@ export async function createApp({
           if (updated.count !== 1) return null;
           return { assetId: asset.id, draftId: draft.id };
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        {},
       );
       if (!result)
         return reply.code(409).send({
@@ -1714,7 +1718,8 @@ export async function createApp({
         JSON.stringify({ draftId: params.draftId, expectedRowVersion: body.expectedRowVersion }),
       );
       const idempotencyClaimId = randomUUID();
-      const result = await database.$transaction(
+      const result = await serializableTransactionWithRetry(
+        database,
         async (tx) => {
           const idempotency = await tx.idempotencyRecord.upsert({
             where: {
@@ -2356,7 +2361,6 @@ export async function createApp({
           });
         },
         {
-          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
           maxWait: 5_000,
           timeout: 15_000,
         },
@@ -3599,7 +3603,8 @@ export async function createApp({
         if (received.size < 1 || received.size > config.FILE_MAX_BYTES)
           throw new BusinessRuleError('FILE_SIZE_INVALID', 'error.file_size', 422);
 
-        const result = await database.$transaction(
+        const result = await serializableTransactionWithRetry(
+          database,
           async (tx) => {
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`anonymized-upload:${submissionId}`}, 0))`;
             const current = await tx.submission.findUniqueOrThrow({
@@ -3674,7 +3679,7 @@ export async function createApp({
             });
             return { submissionVersionId, versionNo };
           },
-          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+          {},
         );
         await fileQueue.add(
           jobNames.ingestTelegramFile,
@@ -4675,7 +4680,8 @@ export async function createApp({
         });
         if (!assignee) throw new BusinessRuleError('ASSIGNEE_INVALID', 'validation.required', 422);
       }
-      const updated = await database.$transaction(
+      const updated = await serializableTransactionWithRetry(
+        database,
         async (tx) => {
           const changed = await tx.dataSubjectRequest.updateMany({
             where: { id: item.id, rowVersion: body.expectedRowVersion, status: item.status },
@@ -4724,7 +4730,7 @@ export async function createApp({
           });
           return after;
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        {},
       );
       if (!updated)
         return reply.code(409).send({
