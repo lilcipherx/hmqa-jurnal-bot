@@ -1,13 +1,20 @@
 import { createHmac } from 'node:crypto';
 import { Buffer } from 'node:buffer';
+import { readFileSync } from 'node:fs';
 import process from 'node:process';
-import { getBundle } from '@hmqa/i18n';
+import { URL } from 'node:url';
 
 const apiBase = process.env.APP_BASE_URL ?? 'http://api:3001';
 const webBase = 'http://nginx:8080';
 const password = process.env.SEED_ADMIN_PASSWORD;
 const totpSecret = process.env.SEED_STAFF_TOTP_SECRET;
-const translationKeys = new Set(Object.keys(getBundle('en')));
+const translationKeys = new Set(
+  Object.keys(
+    JSON.parse(
+      readFileSync(new URL('../../packages/i18n/src/locales/en.json', import.meta.url), 'utf8'),
+    ),
+  ),
+);
 if (!password || !totpSecret)
   throw new Error('Seed credentials are required for the runtime probe');
 
