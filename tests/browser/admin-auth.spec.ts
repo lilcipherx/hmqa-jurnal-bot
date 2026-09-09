@@ -97,6 +97,10 @@ test('admin auth, protected navigation, staff reset, self re-enrollment, and log
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.locator('.app-shell')).toBeVisible();
 
+  const appIcon = await page.request.get('/icon.svg');
+  expect(appIcon.status()).toBe(200);
+  expect(appIcon.headers()['content-type']).toContain('image/svg+xml');
+
   const forbiddenPage = await page.goto('/submissions');
   expect(forbiddenPage).not.toBeNull();
   expect(forbiddenPage!.status()).toBe(403);
