@@ -1,0 +1,8 @@
+node_modules
+dist
+.next
+coverage
+packages/database/src/generated
+.codex-temp
+**/next-env.d.ts
+*.md

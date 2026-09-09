@@ -1,0 +1,1017 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Locale {
+  uz_Latn @map("uz-Latn")
+  ru
+  en
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+  DELETED
+}
+
+enum EmployeeStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  DISABLED
+}
+
+enum JournalMode {
+  NATIVE
+  EXTERNAL_LINK
+  API_SYNC
+  CLOSED
+  ARCHIVED
+}
+
+enum PublicationState {
+  DRAFT
+  REVIEW
+  APPROVED
+  PUBLISHED
+  RETIRED
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  TECHNICAL_REVIEW
+  NEEDS_CORRECTION
+  REGISTERED
+  EDITORIAL_REVIEW
+  UNDER_REVIEW
+  REVISION_REQUESTED
+  REVISION_SUBMITTED
+  ACCEPTED
+  REJECTED
+  COPYEDITING
+  LAYOUT
+  PUBLISHED
+  WITHDRAWN
+  ARCHIVED
+}
+
+enum FileScanStatus {
+  PENDING
+  CLEAN
+  INFECTED
+  SUSPICIOUS
+  ERROR
+  TIMEOUT
+}
+
+enum FileStorageStatus {
+  PENDING
+  QUARANTINED
+  STORED
+  DELETED
+}
+
+enum ReceiptStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum PreflightStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  TIMEOUT
+}
+
+enum Severity {
+  BLOCKING
+  ERROR
+  WARNING
+  INFO
+}
+
+enum AssignmentKind {
+  OPERATOR
+  EDITOR
+  REVIEWER
+}
+
+enum AssignmentStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  COMPLETED
+  CANCELLED
+}
+
+enum ReviewRecommendation {
+  ACCEPT
+  MINOR_REVISION
+  MAJOR_REVISION
+  REJECT
+}
+
+enum DecisionType {
+  ACCEPT
+  REJECT
+}
+
+enum DecisionProposalStatus {
+  PREPARED
+  APPROVED
+  CANCELLED
+}
+
+enum NotificationStatus {
+  PENDING
+  PROCESSING
+  SENT
+  RETRYING
+  FAILED
+  DEAD_LETTER
+  CANCELLED
+}
+
+enum MessageVisibility {
+  PUBLIC
+  INTERNAL
+}
+
+enum ActorType {
+  USER
+  EMPLOYEE
+  SERVICE
+  SYSTEM
+}
+
+enum DataSubjectRequestType {
+  ACCESS
+  RECTIFICATION
+  ERASURE
+  RESTRICTION
+}
+
+enum DataSubjectRequestStatus {
+  RECEIVED
+  IDENTITY_VERIFICATION
+  IN_REVIEW
+  APPROVED
+  DENIED
+  EXECUTING
+  COMPLETED
+  CANCELLED
+}
+
+enum LegalHoldStatus {
+  ACTIVE
+  RELEASED
+}
+
+model User {
+  id                  String               @id @default(uuid()) @db.Uuid
+  telegramUserId      BigInt               @unique @map("telegram_user_id")
+  telegramChatId      BigInt?              @map("telegram_chat_id")
+  username            String?              @db.VarChar(64)
+  locale              Locale?
+  status              UserStatus           @default(ACTIVE)
+  blockedReasonCode   String?              @map("blocked_reason_code") @db.VarChar(64)
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt           DateTime?            @map("deleted_at") @db.Timestamptz(6)
+  authorProfile       AuthorProfile?
+  consents            ConsentRecord[]
+  drafts              Draft[]
+  submissions         Submission[]
+  notifications       Notification[]
+  messageThreads      MessageThread[]
+  dataSubjectRequests DataSubjectRequest[]
+  legalHolds          LegalHold[]
+
+  @@index([status, createdAt])
+  @@map("users")
+}
+
+model AuthorProfile {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @unique @map("user_id") @db.Uuid
+  firstName     String    @map("first_name") @db.VarChar(100)
+  lastName      String    @map("last_name") @db.VarChar(100)
+  middleName    String?   @map("middle_name") @db.VarChar(100)
+  phoneCipher   String    @map("phone_cipher")
+  phoneHash     String    @map("phone_hash") @db.Char(64)
+  emailCipher   String    @map("email_cipher")
+  emailHash     String    @map("email_hash") @db.Char(64)
+  organization  String    @db.VarChar(300)
+  position      String    @db.VarChar(200)
+  degree        String?   @db.VarChar(200)
+  academicTitle String?   @map("academic_title") @db.VarChar(200)
+  country       String?   @db.VarChar(100)
+  city          String?   @db.VarChar(100)
+  orcid         String?   @db.VarChar(19)
+  verifiedAt    DateTime? @map("verified_at") @db.Timestamptz(6)
+  rowVersion    Int       @default(0) @map("row_version")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([emailHash])
+  @@index([phoneHash])
+  @@map("author_profiles")
+}
+
+model ConsentRecord {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  policyVersion String    @map("policy_version") @db.VarChar(64)
+  scope         String    @db.VarChar(100)
+  granted       Boolean
+  locale        Locale
+  fingerprint   String?   @db.VarChar(128)
+  grantedAt     DateTime  @default(now()) @map("granted_at") @db.Timestamptz(6)
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(6)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, policyVersion, scope, grantedAt])
+  @@index([userId, scope, revokedAt])
+  @@map("consents")
+}
+
+model TelegramUpdate {
+  updateId      BigInt    @id @map("update_id")
+  userId        String?   @map("user_id") @db.Uuid
+  correlationId String    @map("correlation_id") @db.Uuid
+  receivedAt    DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt   DateTime? @map("processed_at") @db.Timestamptz(6)
+  outcome       String?   @db.VarChar(64)
+
+  @@index([receivedAt])
+  @@map("telegram_updates")
+}
+
+model Journal {
+  id                   String                      @id @default(uuid()) @db.Uuid
+  code                 String                      @unique @db.VarChar(16)
+  mode                 JournalMode                 @default(CLOSED)
+  active               Boolean                     @default(true)
+  currentRequirementId String?                     @unique @map("current_requirement_id") @db.Uuid
+  acceptanceOpensAt    DateTime?                   @map("acceptance_opens_at") @db.Timestamptz(6)
+  acceptanceClosesAt   DateTime?                   @map("acceptance_closes_at") @db.Timestamptz(6)
+  externalUrl          String?                     @map("external_url")
+  fourEyesRequired     Boolean                     @default(true) @map("four_eyes_required")
+  createdAt            DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  retiredAt            DateTime?                   @map("retired_at") @db.Timestamptz(6)
+  currentRequirement   JournalRequirementVersion?  @relation("CurrentRequirement", fields: [currentRequirementId], references: [id], onDelete: Restrict)
+  localizations        JournalLocalization[]
+  requirementVersions  JournalRequirementVersion[] @relation("JournalRequirements")
+  drafts               Draft[]
+  submissions          Submission[]
+  assignments          Assignment[]
+  scopes               EmployeeJournalScope[]
+  auditLogs            AuditLog[]
+
+  @@index([mode, active])
+  @@map("journals")
+}
+
+model JournalLocalization {
+  id          String   @id @default(uuid()) @db.Uuid
+  journalId   String   @map("journal_id") @db.Uuid
+  locale      Locale
+  name        String   @db.VarChar(500)
+  shortName   String   @map("short_name") @db.VarChar(200)
+  description String
+  contactText String?  @map("contact_text")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  journal     Journal  @relation(fields: [journalId], references: [id], onDelete: Restrict)
+
+  @@unique([journalId, locale])
+  @@map("journal_localizations")
+}
+
+model JournalRequirementVersion {
+  id             String                    @id @default(uuid()) @db.Uuid
+  journalId      String                    @map("journal_id") @db.Uuid
+  version        Int
+  state          PublicationState          @default(DRAFT)
+  effectiveAt    DateTime?                 @map("effective_at") @db.Timestamptz(6)
+  retiredAt      DateTime?                 @map("retired_at") @db.Timestamptz(6)
+  config         Json
+  configHash     String                    @map("config_hash") @db.Char(64)
+  changeNote     String                    @map("change_note")
+  createdById    String?                   @map("created_by_id") @db.Uuid
+  approvedById   String?                   @map("approved_by_id") @db.Uuid
+  publishedAt    DateTime?                 @map("published_at") @db.Timestamptz(6)
+  createdAt      DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  rowVersion     Int                       @default(0) @map("row_version")
+  journal        Journal                   @relation("JournalRequirements", fields: [journalId], references: [id], onDelete: Restrict)
+  currentJournal Journal?                  @relation("CurrentRequirement")
+  localizations  RequirementLocalization[]
+  drafts         Draft[]
+  submissions    Submission[]
+
+  @@unique([journalId, version])
+  @@unique([journalId, configHash])
+  @@index([journalId, state, effectiveAt])
+  @@map("journal_requirement_versions")
+}
+
+model RequirementLocalization {
+  id                   String                    @id @default(uuid()) @db.Uuid
+  requirementVersionId String                    @map("requirement_version_id") @db.Uuid
+  locale               Locale
+  title                String                    @db.VarChar(500)
+  summary              String
+  body                 String
+  help                 String?
+  contact              String?
+  requirementVersion   JournalRequirementVersion @relation(fields: [requirementVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([requirementVersionId, locale])
+  @@map("requirement_localizations")
+}
+
+model Draft {
+  id                   String                     @id @default(uuid()) @db.Uuid
+  userId               String                     @map("user_id") @db.Uuid
+  journalId            String?                    @map("journal_id") @db.Uuid
+  requirementVersionId String?                    @map("requirement_version_id") @db.Uuid
+  machineState         String                     @default("MAIN_MENU") @map("machine_state") @db.VarChar(64)
+  expectedInputType    String?                    @map("expected_input_type") @db.VarChar(64)
+  context              Json                       @default("{}")
+  rowVersion           Int                        @default(0) @map("row_version")
+  expiresAt            DateTime                   @map("expires_at") @db.Timestamptz(6)
+  createdAt            DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt            DateTime?                  @map("deleted_at") @db.Timestamptz(6)
+  user                 User                       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  journal              Journal?                   @relation(fields: [journalId], references: [id], onDelete: Restrict)
+  requirementVersion   JournalRequirementVersion? @relation(fields: [requirementVersionId], references: [id], onDelete: Restrict)
+  files                DraftFile[]
+  preflightRuns        DraftPreflightRun[]
+
+  @@index([userId, deletedAt, updatedAt])
+  @@index([expiresAt, deletedAt])
+  @@map("drafts")
+}
+
+model Submission {
+  id                   String                    @id @default(uuid()) @db.Uuid
+  publicId             String                    @unique @map("public_id") @db.VarChar(64)
+  journalId            String                    @map("journal_id") @db.Uuid
+  ownerId              String                    @map("owner_id") @db.Uuid
+  requirementVersionId String                    @map("requirement_version_id") @db.Uuid
+  status               SubmissionStatus          @default(SUBMITTED)
+  currentVersionNo     Int                       @default(1) @map("current_version_no")
+  rowVersion           Int                       @default(0) @map("row_version")
+  submittedAt          DateTime                  @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  acceptedAt           DateTime?                 @map("accepted_at") @db.Timestamptz(6)
+  publishedAt          DateTime?                 @map("published_at") @db.Timestamptz(6)
+  responseDeadline     DateTime?                 @map("response_deadline") @db.Timestamptz(6)
+  publicationReference String?                   @map("publication_reference")
+  archivedAt           DateTime?                 @map("archived_at") @db.Timestamptz(6)
+  deletedAt            DateTime?                 @map("deleted_at") @db.Timestamptz(6)
+  journal              Journal                   @relation(fields: [journalId], references: [id], onDelete: Restrict)
+  owner                User                      @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  requirementVersion   JournalRequirementVersion @relation(fields: [requirementVersionId], references: [id], onDelete: Restrict)
+  versions             SubmissionVersion[]
+  statusHistory        StatusHistory[]
+  assignments          Assignment[]
+  reviewAssignments    ReviewAssignment[]
+  decisionProposals    DecisionProposal[]
+  notifications        Notification[]
+  messageThread        MessageThread?
+  legalHolds           LegalHold[]
+
+  @@unique([id, currentVersionNo])
+  @@index([journalId, status, submittedAt])
+  @@index([ownerId, status, submittedAt])
+  @@index([status, responseDeadline])
+  @@index([status, submittedAt])
+  @@map("submissions")
+}
+
+model SubmissionVersion {
+  id              String              @id @default(uuid()) @db.Uuid
+  submissionId    String              @map("submission_id") @db.Uuid
+  versionNo       Int                 @map("version_no")
+  profileSnapshot Json                @map("profile_snapshot")
+  declarations    Json
+  changeNote      String?             @map("change_note")
+  submittedById   String              @map("submitted_by_id") @db.Uuid
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  submission      Submission          @relation(fields: [submissionId], references: [id], onDelete: Restrict)
+  authors         SubmissionAuthor[]
+  metadata        SubmissionMetadata?
+  files           SubmissionFile[]
+  preflightRuns   PreflightRun[]
+  receipts        SubmissionReceipt[]
+
+  @@unique([submissionId, versionNo])
+  @@index([submissionId, createdAt])
+  @@map("submission_versions")
+}
+
+model SubmissionAuthor {
+  id                  String            @id @default(uuid()) @db.Uuid
+  submissionVersionId String            @map("submission_version_id") @db.Uuid
+  authorOrder         Int               @map("author_order")
+  isCorresponding     Boolean           @default(false) @map("is_corresponding")
+  dataSnapshot        Json              @map("data_snapshot")
+  submissionVersion   SubmissionVersion @relation(fields: [submissionVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([submissionVersionId, authorOrder])
+  @@map("submission_authors")
+}
+
+model SubmissionMetadata {
+  id                  String            @id @default(uuid()) @db.Uuid
+  submissionVersionId String            @unique @map("submission_version_id") @db.Uuid
+  manuscriptLanguage  String            @map("manuscript_language") @db.VarChar(32)
+  articleType         String            @map("article_type") @db.VarChar(100)
+  sectionCode         String            @map("section_code") @db.VarChar(100)
+  titles              Json
+  abstracts           Json
+  keywords            Json
+  editorialNote       String?           @map("editorial_note")
+  fingerprint         String            @db.Char(64)
+  submissionVersion   SubmissionVersion @relation(fields: [submissionVersionId], references: [id], onDelete: Restrict)
+
+  @@index([fingerprint])
+  @@map("submission_metadata")
+}
+
+model FileAsset {
+  id                 String              @id @default(uuid()) @db.Uuid
+  sourceKey          String?             @unique @map("source_key") @db.VarChar(300)
+  objectKey          String?             @unique @map("object_key")
+  quarantineKey      String?             @unique @map("quarantine_key")
+  originalName       String              @map("original_name") @db.VarChar(500)
+  declaredMime       String?             @map("declared_mime") @db.VarChar(200)
+  detectedMime       String?             @map("detected_mime") @db.VarChar(200)
+  extension          String?             @db.VarChar(32)
+  sizeBytes          BigInt              @map("size_bytes")
+  sha256             String?             @db.Char(64)
+  scanStatus         FileScanStatus      @default(PENDING) @map("scan_status")
+  scanEngineVersion  String?             @map("scan_engine_version") @db.VarChar(100)
+  storageStatus      FileStorageStatus   @default(PENDING) @map("storage_status")
+  provenance         Json
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  storedAt           DateTime?           @map("stored_at") @db.Timestamptz(6)
+  deletedAt          DateTime?           @map("deleted_at") @db.Timestamptz(6)
+  draftLinks         DraftFile[]
+  draftPreflightRuns DraftPreflightRun[]
+  submissionLinks    SubmissionFile[]
+  reviewAssignments  ReviewAssignment[]
+  messageAttachments MessageAttachment[]
+  receipt            SubmissionReceipt?
+
+  @@index([sha256])
+  @@index([scanStatus, storageStatus, createdAt])
+  @@map("file_assets")
+}
+
+model SubmissionReceipt {
+  id                  String            @id @default(uuid()) @db.Uuid
+  submissionVersionId String            @map("submission_version_id") @db.Uuid
+  locale              Locale
+  status              ReceiptStatus     @default(PENDING)
+  fileId              String?           @unique @map("file_id") @db.Uuid
+  templateVersion     String            @map("template_version") @db.VarChar(100)
+  dataSnapshot        Json              @map("data_snapshot")
+  attempts            Int               @default(0)
+  failureCode         String?           @map("failure_code") @db.VarChar(150)
+  readyAt             DateTime?         @map("ready_at") @db.Timestamptz(6)
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  submissionVersion   SubmissionVersion @relation(fields: [submissionVersionId], references: [id], onDelete: Restrict)
+  file                FileAsset?        @relation(fields: [fileId], references: [id], onDelete: Restrict)
+
+  @@unique([submissionVersionId, locale])
+  @@index([status, updatedAt])
+  @@map("submission_receipts")
+}
+
+model DraftFile {
+  draftId    String    @map("draft_id") @db.Uuid
+  fileId     String    @map("file_id") @db.Uuid
+  category   String    @db.VarChar(100)
+  required   Boolean   @default(false)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  replacedAt DateTime? @map("replaced_at") @db.Timestamptz(6)
+  draft      Draft     @relation(fields: [draftId], references: [id], onDelete: Restrict)
+  file       FileAsset @relation(fields: [fileId], references: [id], onDelete: Restrict)
+
+  @@id([draftId, fileId])
+  @@index([draftId, category, replacedAt])
+  @@map("draft_files")
+}
+
+model DraftPreflightRun {
+  id             String          @id @default(uuid()) @db.Uuid
+  draftId        String          @map("draft_id") @db.Uuid
+  fileId         String          @map("file_id") @db.Uuid
+  status         PreflightStatus @default(PENDING)
+  ruleSetVersion String          @map("rule_set_version") @db.VarChar(100)
+  toolVersion    String          @map("tool_version") @db.VarChar(100)
+  blockingCount  Int             @default(0) @map("blocking_count")
+  errorCount     Int             @default(0) @map("error_count")
+  warningCount   Int             @default(0) @map("warning_count")
+  findings       Json            @default("[]")
+  startedAt      DateTime?       @map("started_at") @db.Timestamptz(6)
+  finishedAt     DateTime?       @map("finished_at") @db.Timestamptz(6)
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  draft          Draft           @relation(fields: [draftId], references: [id], onDelete: Restrict)
+  file           FileAsset       @relation(fields: [fileId], references: [id], onDelete: Restrict)
+
+  @@unique([draftId, fileId])
+  @@index([status, createdAt])
+  @@map("draft_preflight_runs")
+}
+
+model SubmissionFile {
+  id                  String            @id @default(uuid()) @db.Uuid
+  submissionVersionId String            @map("submission_version_id") @db.Uuid
+  fileId              String            @map("file_id") @db.Uuid
+  category            String            @db.VarChar(100)
+  required            Boolean
+  versionNo           Int               @map("version_no")
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  submissionVersion   SubmissionVersion @relation(fields: [submissionVersionId], references: [id], onDelete: Restrict)
+  file                FileAsset         @relation(fields: [fileId], references: [id], onDelete: Restrict)
+
+  @@unique([submissionVersionId, category, versionNo])
+  @@unique([submissionVersionId, fileId])
+  @@map("submission_files")
+}
+
+model PreflightRun {
+  id                  String            @id @default(uuid()) @db.Uuid
+  submissionVersionId String            @map("submission_version_id") @db.Uuid
+  fileId              String            @map("file_id") @db.Uuid
+  status              PreflightStatus   @default(PENDING)
+  ruleSetVersion      String            @map("rule_set_version") @db.VarChar(100)
+  toolVersion         String            @map("tool_version") @db.VarChar(100)
+  blockingCount       Int               @default(0) @map("blocking_count")
+  errorCount          Int               @default(0) @map("error_count")
+  warningCount        Int               @default(0) @map("warning_count")
+  findings            Json              @default("[]")
+  startedAt           DateTime?         @map("started_at") @db.Timestamptz(6)
+  finishedAt          DateTime?         @map("finished_at") @db.Timestamptz(6)
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  submissionVersion   SubmissionVersion @relation(fields: [submissionVersionId], references: [id], onDelete: Restrict)
+
+  @@index([submissionVersionId, createdAt])
+  @@index([status, createdAt])
+  @@map("preflight_runs")
+}
+
+model Employee {
+  id                   String                 @id @default(uuid()) @db.Uuid
+  email                String                 @unique @db.Citext
+  displayName          String                 @map("display_name") @db.VarChar(200)
+  passwordHash         String?                @map("password_hash")
+  totpSecretCipher     String?                @map("totp_secret_cipher")
+  totpEnabled          Boolean                @default(false) @map("totp_enabled")
+  status               EmployeeStatus         @default(INVITED)
+  failedLoginCount     Int                    @default(0) @map("failed_login_count")
+  lockedUntil          DateTime?              @map("locked_until") @db.Timestamptz(6)
+  lastLoginAt          DateTime?              @map("last_login_at") @db.Timestamptz(6)
+  createdAt            DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  disabledAt           DateTime?              @map("disabled_at") @db.Timestamptz(6)
+  roles                EmployeeRole[]
+  journalScopes        EmployeeJournalScope[]
+  sessions             StaffSession[]
+  assignments          Assignment[]
+  reviewerProfile      ReviewerProfile?
+  decisionsPrepared    DecisionProposal[]     @relation("DecisionPreparedBy")
+  decisionsApproved    DecisionProposal[]     @relation("DecisionApprovedBy")
+  invitations          StaffInvitation[]
+  privacyCasesAssigned DataSubjectRequest[]   @relation("PrivacyCaseAssignee")
+  legalHoldsPlaced     LegalHold[]            @relation("LegalHoldPlacedBy")
+  legalHoldsReleased   LegalHold[]            @relation("LegalHoldReleasedBy")
+
+  @@index([status, lockedUntil])
+  @@map("employees")
+}
+
+model Role {
+  id          String           @id @default(uuid()) @db.Uuid
+  code        String           @unique @db.VarChar(64)
+  description String
+  system      Boolean          @default(true)
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  employees   EmployeeRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String           @id @default(uuid()) @db.Uuid
+  code        String           @unique @db.VarChar(100)
+  description String
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model EmployeeRole {
+  employeeId String    @map("employee_id") @db.Uuid
+  roleId     String    @map("role_id") @db.Uuid
+  grantedBy  String?   @map("granted_by") @db.Uuid
+  grantedAt  DateTime  @default(now()) @map("granted_at") @db.Timestamptz(6)
+  expiresAt  DateTime? @map("expires_at") @db.Timestamptz(6)
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  role       Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([employeeId, roleId])
+  @@index([expiresAt])
+  @@map("employee_roles")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id") @db.Uuid
+  permissionId String     @map("permission_id") @db.Uuid
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model EmployeeJournalScope {
+  employeeId String    @map("employee_id") @db.Uuid
+  journalId  String    @map("journal_id") @db.Uuid
+  grantedBy  String?   @map("granted_by") @db.Uuid
+  grantedAt  DateTime  @default(now()) @map("granted_at") @db.Timestamptz(6)
+  expiresAt  DateTime? @map("expires_at") @db.Timestamptz(6)
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  journal    Journal   @relation(fields: [journalId], references: [id], onDelete: Restrict)
+
+  @@id([employeeId, journalId])
+  @@index([expiresAt])
+  @@map("employee_journal_scopes")
+}
+
+model StaffSession {
+  id            String    @id @default(uuid()) @db.Uuid
+  employeeId    String    @map("employee_id") @db.Uuid
+  tokenHash     String    @unique @map("token_hash") @db.Char(64)
+  csrfHash      String    @map("csrf_hash") @db.Char(64)
+  ipHash        String?   @map("ip_hash") @db.Char(64)
+  userAgentHash String?   @map("user_agent_hash") @db.Char(64)
+  twoFactorAt   DateTime  @map("two_factor_at") @db.Timestamptz(6)
+  stepUpUntil   DateTime? @map("step_up_until") @db.Timestamptz(6)
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(6)
+  lastSeenAt    DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, revokedAt, expiresAt])
+  @@map("staff_sessions")
+}
+
+model StaffInvitation {
+  id          String    @id @default(uuid()) @db.Uuid
+  employeeId  String    @map("employee_id") @db.Uuid
+  tokenHash   String    @unique @map("token_hash") @db.Char(64)
+  createdById String    @map("created_by_id") @db.Uuid
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
+  acceptedAt  DateTime? @map("accepted_at") @db.Timestamptz(6)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, expiresAt, acceptedAt])
+  @@map("staff_invitations")
+}
+
+model Assignment {
+  id           String           @id @default(uuid()) @db.Uuid
+  submissionId String           @map("submission_id") @db.Uuid
+  employeeId   String           @map("employee_id") @db.Uuid
+  journalId    String           @map("journal_id") @db.Uuid
+  kind         AssignmentKind
+  status       AssignmentStatus @default(PENDING)
+  reason       String
+  assignedById String?          @map("assigned_by_id") @db.Uuid
+  assignedAt   DateTime         @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  deadline     DateTime?        @db.Timestamptz(6)
+  completedAt  DateTime?        @map("completed_at") @db.Timestamptz(6)
+  submission   Submission       @relation(fields: [submissionId], references: [id], onDelete: Restrict)
+  employee     Employee         @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  journal      Journal          @relation(fields: [journalId], references: [id], onDelete: Restrict)
+
+  @@index([submissionId, kind, status])
+  @@index([employeeId, status, deadline])
+  @@map("assignments")
+}
+
+model ReviewerProfile {
+  id          String             @id @default(uuid()) @db.Uuid
+  employeeId  String             @unique @map("employee_id") @db.Uuid
+  expertise   Json
+  affiliation String             @db.VarChar(300)
+  active      Boolean            @default(true)
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  employee    Employee           @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  assignments ReviewAssignment[]
+
+  @@map("reviewers")
+}
+
+model ReviewAssignment {
+  id               String           @id @default(uuid()) @db.Uuid
+  submissionId     String           @map("submission_id") @db.Uuid
+  reviewerId       String           @map("reviewer_id") @db.Uuid
+  anonymizedFileId String           @map("anonymized_file_id") @db.Uuid
+  status           AssignmentStatus @default(PENDING)
+  conflictDeclared Boolean?         @map("conflict_declared")
+  assignedAt       DateTime         @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  deadline         DateTime         @db.Timestamptz(6)
+  completedAt      DateTime?        @map("completed_at") @db.Timestamptz(6)
+  submission       Submission       @relation(fields: [submissionId], references: [id], onDelete: Restrict)
+  reviewer         ReviewerProfile  @relation(fields: [reviewerId], references: [id], onDelete: Restrict)
+  anonymizedFile   FileAsset        @relation(fields: [anonymizedFileId], references: [id], onDelete: Restrict)
+  review           Review?
+
+  @@unique([submissionId, reviewerId, assignedAt])
+  @@index([reviewerId, status, deadline])
+  @@map("review_assignments")
+}
+
+model Review {
+  id                   String               @id @default(uuid()) @db.Uuid
+  reviewAssignmentId   String               @unique @map("review_assignment_id") @db.Uuid
+  recommendation       ReviewRecommendation
+  publicComments       String               @map("public_comments")
+  confidentialComments String?              @map("confidential_comments")
+  submittedAt          DateTime             @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  assignment           ReviewAssignment     @relation(fields: [reviewAssignmentId], references: [id], onDelete: Restrict)
+
+  @@map("reviews")
+}
+
+model DecisionProposal {
+  id            String                 @id @default(uuid()) @db.Uuid
+  submissionId  String                 @map("submission_id") @db.Uuid
+  decision      DecisionType
+  publicReason  String                 @map("public_reason")
+  internalBasis String                 @map("internal_basis")
+  status        DecisionProposalStatus @default(PREPARED)
+  preparedById  String                 @map("prepared_by_id") @db.Uuid
+  approvedById  String?                @map("approved_by_id") @db.Uuid
+  createdAt     DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  approvedAt    DateTime?              @map("approved_at") @db.Timestamptz(6)
+  cancelledAt   DateTime?              @map("cancelled_at") @db.Timestamptz(6)
+  submission    Submission             @relation(fields: [submissionId], references: [id], onDelete: Restrict)
+  preparedBy    Employee               @relation("DecisionPreparedBy", fields: [preparedById], references: [id], onDelete: Restrict)
+  approvedBy    Employee?              @relation("DecisionApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  @@index([submissionId, status, createdAt])
+  @@index([preparedById, createdAt])
+  @@map("decision_proposals")
+}
+
+model StatusHistory {
+  id             String           @id @default(uuid()) @db.Uuid
+  submissionId   String           @map("submission_id") @db.Uuid
+  fromStatus     SubmissionStatus @map("from_status")
+  toStatus       SubmissionStatus @map("to_status")
+  actorType      ActorType        @map("actor_type")
+  actorId        String?          @map("actor_id") @db.Uuid
+  actorRole      String?          @map("actor_role") @db.VarChar(64)
+  publicReason   String?          @map("public_reason")
+  internalReason String?          @map("internal_reason")
+  correlationId  String           @map("correlation_id") @db.Uuid
+  correctionOfId String?          @map("correction_of_id") @db.Uuid
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  submission     Submission       @relation(fields: [submissionId], references: [id], onDelete: Restrict)
+
+  @@index([submissionId, createdAt])
+  @@index([correlationId])
+  @@map("status_history")
+}
+
+model Notification {
+  id                String             @id @default(uuid()) @db.Uuid
+  eventId           String             @unique @map("event_id") @db.Uuid
+  submissionId      String?            @map("submission_id") @db.Uuid
+  userId            String             @map("user_id") @db.Uuid
+  eventCode         String             @map("event_code") @db.VarChar(100)
+  locale            Locale
+  templateVersion   String             @map("template_version") @db.VarChar(100)
+  templateSnapshot  Json               @map("template_snapshot")
+  variables         Json
+  status            NotificationStatus @default(PENDING)
+  attempts          Int                @default(0)
+  generation        Int                @default(0)
+  nextAttemptAt     DateTime?          @map("next_attempt_at") @db.Timestamptz(6)
+  providerMessageId String?            @map("provider_message_id") @db.VarChar(100)
+  providerResult    Json?              @map("provider_result")
+  lastErrorCode     String?            @map("last_error_code") @db.VarChar(100)
+  sentAt            DateTime?          @map("sent_at") @db.Timestamptz(6)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  submission        Submission?        @relation(fields: [submissionId], references: [id], onDelete: Restrict)
+  user              User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model MessageThread {
+  id           String      @id @default(uuid()) @db.Uuid
+  submissionId String?     @unique @map("submission_id") @db.Uuid
+  userId       String      @map("user_id") @db.Uuid
+  status       String      @default("OPEN") @db.VarChar(32)
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  submission   Submission? @relation(fields: [submissionId], references: [id], onDelete: Restrict)
+  user         User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  messages     Message[]
+
+  @@index([userId, status, updatedAt])
+  @@map("message_threads")
+}
+
+model Message {
+  id          String              @id @default(uuid()) @db.Uuid
+  threadId    String              @map("thread_id") @db.Uuid
+  visibility  MessageVisibility
+  actorType   ActorType           @map("actor_type")
+  actorId     String?             @map("actor_id") @db.Uuid
+  body        String
+  locale      Locale?
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  thread      MessageThread       @relation(fields: [threadId], references: [id], onDelete: Restrict)
+  attachments MessageAttachment[]
+
+  @@index([threadId, createdAt])
+  @@map("messages")
+}
+
+model MessageAttachment {
+  messageId String    @map("message_id") @db.Uuid
+  fileId    String    @map("file_id") @db.Uuid
+  message   Message   @relation(fields: [messageId], references: [id], onDelete: Restrict)
+  file      FileAsset @relation(fields: [fileId], references: [id], onDelete: Restrict)
+
+  @@id([messageId, fileId])
+  @@map("message_attachments")
+}
+
+model DataSubjectRequest {
+  id                 String                   @id @default(uuid()) @db.Uuid
+  publicId           String                   @unique @map("public_id") @db.VarChar(64)
+  userId             String                   @map("user_id") @db.Uuid
+  type               DataSubjectRequestType
+  status             DataSubjectRequestStatus @default(RECEIVED)
+  locale             Locale
+  requestNote        String?                  @map("request_note")
+  assignedToId       String?                  @map("assigned_to_id") @db.Uuid
+  identityVerifiedAt DateTime?                @map("identity_verified_at") @db.Timestamptz(6)
+  dueAt              DateTime                 @map("due_at") @db.Timestamptz(6)
+  decisionReason     String?                  @map("decision_reason")
+  executionReport    Json?                    @map("execution_report")
+  completedAt        DateTime?                @map("completed_at") @db.Timestamptz(6)
+  rowVersion         Int                      @default(0) @map("row_version")
+  createdAt          DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user               User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  assignedTo         Employee?                @relation("PrivacyCaseAssignee", fields: [assignedToId], references: [id], onDelete: Restrict)
+  relatedLegalHolds  LegalHold[]
+
+  @@index([userId, status, createdAt])
+  @@index([status, dueAt])
+  @@index([assignedToId, status])
+  @@map("data_subject_requests")
+}
+
+model LegalHold {
+  id                   String              @id @default(uuid()) @db.Uuid
+  status               LegalHoldStatus     @default(ACTIVE)
+  subjectUserId        String?             @map("subject_user_id") @db.Uuid
+  submissionId         String?             @map("submission_id") @db.Uuid
+  dataSubjectRequestId String?             @map("data_subject_request_id") @db.Uuid
+  reason               String
+  placedById           String              @map("placed_by_id") @db.Uuid
+  placedAt             DateTime            @default(now()) @map("placed_at") @db.Timestamptz(6)
+  releasedById         String?             @map("released_by_id") @db.Uuid
+  releasedAt           DateTime?           @map("released_at") @db.Timestamptz(6)
+  releaseReason        String?             @map("release_reason")
+  expiresAt            DateTime?           @map("expires_at") @db.Timestamptz(6)
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  subjectUser          User?               @relation(fields: [subjectUserId], references: [id], onDelete: Restrict)
+  submission           Submission?         @relation(fields: [submissionId], references: [id], onDelete: Restrict)
+  dataSubjectRequest   DataSubjectRequest? @relation(fields: [dataSubjectRequestId], references: [id], onDelete: Restrict)
+  placedBy             Employee            @relation("LegalHoldPlacedBy", fields: [placedById], references: [id], onDelete: Restrict)
+  releasedBy           Employee?           @relation("LegalHoldReleasedBy", fields: [releasedById], references: [id], onDelete: Restrict)
+
+  @@index([subjectUserId, status])
+  @@index([submissionId, status])
+  @@index([dataSubjectRequestId, status])
+  @@index([status, expiresAt])
+  @@map("legal_holds")
+}
+
+model TranslationKey {
+  id          String               @id @default(uuid()) @db.Uuid
+  key         String               @unique @db.VarChar(200)
+  namespace   String               @db.VarChar(100)
+  description String
+  versions    TranslationVersion[]
+
+  @@map("translation_keys")
+}
+
+model TranslationVersion {
+  id               String           @id @default(uuid()) @db.Uuid
+  translationKeyId String           @map("translation_key_id") @db.Uuid
+  locale           Locale
+  version          Int
+  state            PublicationState @default(DRAFT)
+  message          String
+  placeholders     Json
+  createdById      String?          @map("created_by_id") @db.Uuid
+  approvedById     String?          @map("approved_by_id") @db.Uuid
+  publishedAt      DateTime?        @map("published_at") @db.Timestamptz(6)
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  translationKey   TranslationKey   @relation(fields: [translationKeyId], references: [id], onDelete: Restrict)
+
+  @@unique([translationKeyId, locale, version])
+  @@index([state, locale, publishedAt])
+  @@map("translation_versions")
+}
+
+model AuditLog {
+  id            String    @id @default(uuid()) @db.Uuid
+  actorType     ActorType @map("actor_type")
+  actorId       String?   @map("actor_id") @db.Uuid
+  actorRole     String?   @map("actor_role") @db.VarChar(64)
+  action        String    @db.VarChar(150)
+  entity        String    @db.VarChar(100)
+  entityId      String?   @map("entity_id") @db.Uuid
+  journalId     String?   @map("journal_id") @db.Uuid
+  before        Json?
+  after         Json?
+  outcome       String    @db.VarChar(32)
+  ipHash        String?   @map("ip_hash") @db.Char(64)
+  userAgentHash String?   @map("user_agent_hash") @db.Char(64)
+  requestId     String    @map("request_id") @db.Uuid
+  correlationId String    @map("correlation_id") @db.Uuid
+  prevHash      String?   @map("prev_hash") @db.Char(64)
+  eventHash     String    @unique @map("event_hash") @db.Char(64)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  journal       Journal?  @relation(fields: [journalId], references: [id], onDelete: Restrict)
+
+  @@index([entity, entityId, createdAt])
+  @@index([journalId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([correlationId])
+  @@map("audit_logs")
+}
+
+model IdempotencyRecord {
+  id             String   @id @default(uuid()) @db.Uuid
+  scope          String   @db.VarChar(100)
+  keyHash        String   @map("key_hash") @db.Char(64)
+  requestHash    String   @map("request_hash") @db.Char(64)
+  responseStatus Int?     @map("response_status")
+  responseBody   Json?    @map("response_body")
+  resourceId     String?  @map("resource_id") @db.Uuid
+  lockedUntil    DateTime @map("locked_until") @db.Timestamptz(6)
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([scope, keyHash])
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}
+
+model JournalYearSequence {
+  journalCode String   @map("journal_code") @db.VarChar(16)
+  year        Int
+  value       Int      @default(0)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([journalCode, year])
+  @@map("journal_year_sequences")
+}

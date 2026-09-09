@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "noEmit": true, "rootDir": "." },
+  "include": [
+    "tests/**/*.ts",
+    "apps/**/*.spec.ts",
+    "apps/**/*.test.ts",
+    "packages/**/*.spec.ts",
+    "packages/**/*.test.ts",
+    "apps/api/src/types.d.ts"
+  ]
+}

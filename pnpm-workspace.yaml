@@ -1,0 +1,16 @@
+packages:
+  - apps/*
+  - packages/*
+
+overrides:
+  deepmerge-ts: 8.0.2
+  mysql2: 3.23.4
+
+allowBuilds:
+  '@prisma/client': true
+  '@prisma/engines': true
+  argon2: true
+  esbuild: true
+  msgpackr-extract: false
+  prisma: true
+  sharp: true

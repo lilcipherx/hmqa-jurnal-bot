@@ -1,0 +1,219 @@
+name: hmqa-jurnal-bot
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: infrastructure/docker/Dockerfile
+  env_file: ${ENV_FILE:-.env}
+  restart: unless-stopped
+  networks: [backend]
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+
+  redis:
+    image: redis:8.2.1-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+
+  minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    restart: unless-stopped
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-07-21T05-28-08Z
+    depends_on:
+      minio: { condition: service_healthy }
+    restart: 'no'
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_QUARANTINE_BUCKET: ${S3_QUARANTINE_BUCKET}
+    entrypoint: ['/bin/sh', '-ec']
+    command:
+      - |
+        mc alias set local http://minio:9000 "$${S3_ACCESS_KEY}" "$${S3_SECRET_KEY}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+        mc anonymous set none "local/$${S3_BUCKET}"
+        mc version enable "local/$${S3_BUCKET}"
+        mc mb --ignore-existing "local/$${S3_QUARANTINE_BUCKET}"
+        mc anonymous set none "local/$${S3_QUARANTINE_BUCKET}"
+    networks: [backend]
+
+  clamav:
+    image: clamav/clamav:1.4.3
+    restart: unless-stopped
+    volumes:
+      - clamav-db:/var/lib/clamav
+    networks: [backend]
+
+  migrate:
+    <<: *app
+    restart: 'no'
+    command: ['pnpm', '--filter', '@hmqa/database', 'prisma:migrate:deploy']
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    <<: *app
+    command: ['pnpm', '--filter', '@hmqa/api', 'start']
+    environment:
+      PORT: 3001
+    volumes:
+      - quarantine-data:/var/lib/hmqa/quarantine
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+
+  bot:
+    <<: *app
+    command: ['pnpm', '--filter', '@hmqa/bot', 'start']
+    environment:
+      PORT: 3002
+      APP_BASE_URL: http://api:3001
+    depends_on:
+      api: { condition: service_started }
+
+  worker:
+    <<: *app
+    command: ['pnpm', '--filter', '@hmqa/worker', 'start']
+    environment:
+      PORT: 3003
+    volumes:
+      - quarantine-data:/var/lib/hmqa/quarantine
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: 2.0
+    mem_limit: 3g
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+      clamav: { condition: service_started }
+
+  admin-web:
+    <<: *app
+    command: ['pnpm', '--filter', '@hmqa/admin-web', 'start']
+    environment:
+      API_INTERNAL_URL: http://api:3001
+      ADMIN_BASE_URL: ${ADMIN_BASE_URL}
+    depends_on:
+      api: { condition: service_started }
+
+  nginx:
+    image: nginx:1.28.0-alpine
+    restart: unless-stopped
+    ports:
+      - '${HTTP_PORT:-8080}:8080'
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+      - bot
+      - admin-web
+    networks: [backend]
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: [monitoring]
+    restart: unless-stopped
+    command:
+      [
+        '--config.file=/etc/prometheus/prometheus.yml',
+        '--storage.tsdb.path=/prometheus',
+        '--storage.tsdb.retention.time=30d',
+      ]
+    volumes:
+      - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infrastructure/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    networks: [backend]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    profiles: [monitoring]
+    restart: unless-stopped
+    command: ['--config.file=/etc/alertmanager/alertmanager.yml']
+    volumes:
+      - ./infrastructure/monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    networks: [backend]
+
+  backup:
+    profiles: [backup]
+    build:
+      context: .
+      dockerfile: infrastructure/docker/backup.Dockerfile
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      SOURCE_S3_ENDPOINT: http://minio:9000
+      SOURCE_S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      SOURCE_S3_SECRET_KEY: ${S3_SECRET_KEY}
+      SOURCE_S3_BUCKET: ${S3_BUCKET}
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY}
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_KEY}
+      RESTIC_KEEP_DAILY: ${RESTIC_KEEP_DAILY:-14}
+      RESTIC_KEEP_WEEKLY: ${RESTIC_KEEP_WEEKLY:-8}
+      RESTIC_KEEP_MONTHLY: ${RESTIC_KEEP_MONTHLY:-12}
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+    networks: [backend]
+
+networks:
+  backend:
+    internal: false
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  clamav-db:
+  quarantine-data:
+  prometheus-data:

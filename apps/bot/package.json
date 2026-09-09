@@ -1,0 +1,23 @@
+{
+  "name": "@hmqa/bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@sentry/node": "^10.11.0",
+    "@hmqa/config": "workspace:*",
+    "@hmqa/contracts": "workspace:*",
+    "@hmqa/i18n": "workspace:*",
+    "@hmqa/logger": "workspace:*",
+    "@hmqa/security": "workspace:*",
+    "fastify": "^5.6.0",
+    "grammy": "^1.38.2",
+    "zod": "^4.1.5"
+  }
+}

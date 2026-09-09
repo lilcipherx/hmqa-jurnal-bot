@@ -1,0 +1,27 @@
+groups:
+  - name: hmqa-production
+    rules:
+      - alert: HmqaServiceDown
+        expr: up{job=~"hmqa-.*"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations: { summary: 'HMQA service is unavailable' }
+      - alert: HmqaApiErrorRate
+        expr: sum(rate(hmqa_api_request_duration_seconds_count{status_code=~"5.."}[5m])) / clamp_min(sum(rate(hmqa_api_request_duration_seconds_count[5m])), 1) > 0.05
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: 'API 5xx ratio is above 5%' }
+      - alert: HmqaApiLatency
+        expr: histogram_quantile(0.95, sum by (le) (rate(hmqa_api_request_duration_seconds_bucket[5m]))) > 2
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: 'API p95 latency is above two seconds' }
+      - alert: HmqaQueueBacklog
+        expr: hmqa_worker_queue_depth > 100
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: 'A worker queue has more than 100 pending jobs' }
+      - alert: HmqaFailedJobs
+        expr: increase(hmqa_worker_failed_jobs_total[15m]) > 5
+        labels: { severity: critical }
+        annotations: { summary: 'More than five worker jobs failed in 15 minutes' }

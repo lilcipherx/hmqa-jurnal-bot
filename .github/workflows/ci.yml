@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { persist-credentials: false }
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+        with: { version: 11.19.0, run_install: false }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.11.1
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm --filter @hmqa/database exec prisma validate
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm test:i18n
+      - run: pnpm security:secrets
+      - run: pnpm audit --audit-level moderate
+
+  integration:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_DB: hmqa_test
+          POSTGRES_USER: hmqa
+          POSTGRES_PASSWORD: integration-only-password
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U hmqa -d hmqa_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:8.2.1-alpine
+        ports: [6379:6379]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://hmqa:integration-only-password@127.0.0.1:5432/hmqa_test?schema=public
+      REDIS_URL: redis://127.0.0.1:6379/15
+      REQUIRE_RUNTIME_TESTS: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { persist-credentials: false }
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+        with: { version: 11.19.0, run_install: false }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.11.1
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm build
+      - run: pnpm db:migrate
+      - name: Verify idempotent development seed
+        env:
+          SEED_ADMIN_EMAIL: ci-admin@example.invalid
+          SEED_ADMIN_PASSWORD: CI-development-only-password-2026!
+          SEED_STAFF_TOTP_SECRET: JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP
+          ENCRYPTION_KEY: ci-integration-encryption-key-not-production
+        run: pnpm db:seed && pnpm db:seed
+      - run: pnpm test:integration:required
+      - run: pnpm test:e2e:required
+
+  runtime:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 90
+    env:
+      HMQA_RUNTIME_PROJECT: hmqa-verification-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { persist-credentials: false }
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+        with: { version: 11.19.0, run_install: false }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.11.1
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify:runtime
+      - name: Preserve runtime evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: runtime-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .codex-temp/runtime-verification/report.json
+          if-no-files-found: error
+
+  required:
+    if: always()
+    needs: [quality, integration, runtime]
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Enforce all required jobs
+        env:
+          QUALITY: ${{ needs.quality.result }}
+          INTEGRATION: ${{ needs.integration.result }}
+          RUNTIME: ${{ needs.runtime.result }}
+        run: test "$QUALITY" = success && test "$INTEGRATION" = success && test "$RUNTIME" = success

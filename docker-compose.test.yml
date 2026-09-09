@@ -1,0 +1,126 @@
+services:
+  telegram-stub:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile
+      target: verification
+    command: ['node', 'tests/fixtures/telegram-api-server.mjs']
+    environment:
+      PORT: 8081
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:8081/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    networks: [backend]
+
+  bot:
+    depends_on:
+      telegram-stub: { condition: service_healthy }
+
+  worker:
+    depends_on:
+      telegram-stub: { condition: service_healthy }
+
+  runtime-tests:
+    profiles: [runtime]
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile
+      target: verification
+    env_file: ${ENV_FILE:-.env.test.example}
+    command: ['pnpm', 'test:runtime:required']
+    volumes:
+      - quarantine-data:/var/lib/hmqa/quarantine
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+      clamav: { condition: service_started }
+      telegram-stub: { condition: service_healthy }
+    networks: [backend]
+
+  backup:
+    environment:
+      RESTIC_REPOSITORY: /var/lib/hmqa/restic
+    volumes:
+      - backup-repository:/var/lib/hmqa/restic
+
+  postgres-recovery:
+    profiles: [runtime]
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: hmqa_recovery
+      POSTGRES_USER: hmqa_recovery
+      POSTGRES_PASSWORD: test-only-recovery-password
+    volumes:
+      - postgres-recovery-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U hmqa_recovery -d hmqa_recovery']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks: [backend]
+
+  minio-recovery:
+    profiles: [runtime]
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: hmqa-test-access
+      MINIO_ROOT_PASSWORD: test-only-minio-secret-key
+    volumes:
+      - minio-recovery-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks: [backend]
+
+  minio-recovery-init:
+    profiles: [runtime]
+    image: minio/mc:RELEASE.2025-07-21T05-28-08Z
+    depends_on:
+      minio-recovery: { condition: service_healthy }
+    entrypoint: ['/bin/sh', '-ec']
+    command:
+      - |
+        mc alias set recovery http://minio-recovery:9000 hmqa-test-access test-only-minio-secret-key
+        mc mb --ignore-existing recovery/hmqa-test-recovery
+        mc anonymous set none recovery/hmqa-test-recovery
+        mc version enable recovery/hmqa-test-recovery
+        mc mb --ignore-existing recovery/hmqa-test-recovery-quarantine
+        mc anonymous set none recovery/hmqa-test-recovery-quarantine
+    networks: [backend]
+
+  api-recovery:
+    profiles: [runtime]
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile
+    env_file: ${ENV_FILE:-.env.test.example}
+    command: ['pnpm', '--filter', '@hmqa/api', 'start']
+    environment:
+      PORT: 3101
+      DATABASE_URL: postgresql://hmqa_recovery:test-only-recovery-password@postgres-recovery:5432/hmqa_recovery?schema=public
+      S3_ENDPOINT: http://minio-recovery:9000
+      S3_BUCKET: hmqa-test-recovery
+      S3_QUARANTINE_BUCKET: hmqa-test-recovery-quarantine
+    depends_on:
+      postgres-recovery: { condition: service_healthy }
+      minio-recovery-init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    networks: [backend]
+
+volumes:
+  backup-repository:
+  postgres-recovery-data:
+  minio-recovery-data:
