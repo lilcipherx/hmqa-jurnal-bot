@@ -128,7 +128,7 @@ jobs:
           name: runtime-verification-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             .codex-temp/runtime-verification/report.json
-            .codex-temp/test-reports/*.json
+            .codex-temp/test-reports/runtime.json
           if-no-files-found: error
           include-hidden-files: true
 

@@ -35,7 +35,29 @@ const evidence = {
   outcome: 'RUNNING',
   checks: [],
   blocker: null,
+  diagnostics: null,
 };
+
+const diagnosticSecrets = [
+  '123456:test-only-token',
+  'test-only-webhook-secret-32-characters',
+  'test-only-postgres-password',
+  'test-only-minio-secret-key',
+  'test-only-service-secret-32-characters',
+  'test-only-session-secret-32-characters',
+  'test-only-encryption-key-32-characters',
+  'Test-only-admin-password-2026!',
+  'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP',
+  'test-only-restic-password-32-characters',
+  'test-only-backup-secret',
+];
+
+function redactDiagnostics(value) {
+  return diagnosticSecrets.reduce(
+    (redacted, secret) => redacted.replaceAll(secret, '[REDACTED]'),
+    value,
+  );
+}
 
 function record(label, status, startedAt) {
   evidence.checks.push({ label, status, durationMs: Date.now() - startedAt });
@@ -111,6 +133,21 @@ function cleanup() {
     process.stderr.write(
       `[runtime] cleanup warning: ${(result.stderr || result.stdout || '').trim()}\n`,
     );
+}
+
+function captureFailureDiagnostics() {
+  const status = tryCompose(['ps', '--all']);
+  const workerLogs = tryCompose(['logs', '--no-color', '--tail', '200', 'worker']);
+  const diagnostics = {
+    composeStatus: redactDiagnostics(`${status.stdout ?? ''}${status.stderr ?? ''}`).slice(-8_000),
+    workerLogs: redactDiagnostics(`${workerLogs.stdout ?? ''}${workerLogs.stderr ?? ''}`).slice(
+      -16_000,
+    ),
+  };
+  process.stderr.write(
+    `\n[runtime] failure diagnostics\n${JSON.stringify(diagnostics, null, 2)}\n`,
+  );
+  return diagnostics;
 }
 
 mkdirSync(reportDirectory, { recursive: true });
@@ -460,6 +497,7 @@ try {
 } catch (error) {
   evidence.outcome = 'FAILED';
   evidence.blocker = error instanceof Error ? error.message : String(error);
+  evidence.diagnostics = captureFailureDiagnostics();
   process.exitCode = 1;
 } finally {
   evidence.finishedAt = new Date().toISOString();
