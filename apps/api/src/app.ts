@@ -602,26 +602,13 @@ export async function createApp({
         where: { tokenHash: hashOpaqueToken(body.token) },
         include: { employee: true },
       });
-      if (!invitation || invitation.revokedAt || !invitation.employee.totpSecretCipher)
-        return reply.code(404).send({
-          code: 'INVITATION_INVALID',
-          messageKey: 'error.stale_action',
-          correlationId: request.id,
-        });
-      if (invitation.acceptedAt) {
-        if (
-          invitation.employee.status === 'ACTIVE' &&
-          invitation.employee.passwordHash &&
-          invitation.employee.totpEnabled
-        )
-          return reply.code(204).send();
-        return reply.code(404).send({
-          code: 'INVITATION_INVALID',
-          messageKey: 'error.stale_action',
-          correlationId: request.id,
-        });
-      }
-      if (invitation.expiresAt <= new Date())
+      if (
+        !invitation ||
+        invitation.acceptedAt ||
+        invitation.revokedAt ||
+        invitation.expiresAt <= new Date() ||
+        !invitation.employee.totpSecretCipher
+      )
         return reply.code(404).send({
           code: 'INVITATION_INVALID',
           messageKey: 'error.stale_action',
@@ -657,13 +644,26 @@ export async function createApp({
         where: { tokenHash: hashOpaqueToken(body.token) },
         include: { employee: true },
       });
-      if (
-        !invitation ||
-        invitation.acceptedAt ||
-        invitation.revokedAt ||
-        invitation.expiresAt <= new Date() ||
-        !invitation.employee.totpSecretCipher
-      )
+      if (!invitation || invitation.revokedAt || !invitation.employee.totpSecretCipher)
+        return reply.code(404).send({
+          code: 'INVITATION_INVALID',
+          messageKey: 'error.stale_action',
+          correlationId: request.id,
+        });
+      if (invitation.acceptedAt) {
+        if (
+          invitation.employee.status === 'ACTIVE' &&
+          invitation.employee.passwordHash &&
+          invitation.employee.totpEnabled
+        )
+          return reply.code(204).send();
+        return reply.code(404).send({
+          code: 'INVITATION_INVALID',
+          messageKey: 'error.stale_action',
+          correlationId: request.id,
+        });
+      }
+      if (invitation.expiresAt <= new Date())
         return reply.code(404).send({
           code: 'INVITATION_INVALID',
           messageKey: 'error.stale_action',
