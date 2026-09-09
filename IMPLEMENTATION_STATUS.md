@@ -8,43 +8,41 @@ Allowed values: `NOT_STARTED`, `IN_PROGRESS`, `IMPLEMENTED`, `TESTED`, `VERIFIED
 |---|---|---|
 | R-001 Telegram-only author journey | TESTED | grammY bot flow, localized BotFather catalog and `/start`, `/help`, `/journals`, `/submit`, `/drafts`, `/status`, `/profile`, `/language`, `/cancel`, `/privacy`, status/file-version views, signed downloads, and conversation tests; real Telegram staging smoke pending |
 | R-002 Three complete locales | TESTED | Three bundles, fallback/placeholder/key-parity tests; Academy linguistic approval pending |
-| R-003 Persistent draft wizard | IMPLEMENTED | PostgreSQL article/profile draft state, expiry, optimistic locking, resume/save/cancel/replace, existing-profile snapshot; locale-preservation integration test exists, real restart integration pending |
-| R-004 Versioned journal requirements | IMPLEMENTED | Schema, lifecycle API, three-locale admin, pinned submission reference, versioned reviewer/workflow policy; clean-DB runtime pending |
-| R-005 Immutable submission versions | IMPLEMENTED | Atomic idempotent initial/revision creation, receipt snapshot, and E2E spec; real DB E2E not runnable on this host |
-| R-006 Secure file pipeline | TESTED | Requirement-driven multi-file validation, declared/detected MIME, bounded OOXML and configurable LibreOffice preflight, private clean/evidence buckets, hash/signature/ClamAV, immutable author/reviewer versions, PF-015, signed URL/version recovery, and unit/runtime specs; real MinIO/ClamAV/LibreOffice run pending |
+| R-003 Persistent draft wizard | TESTED | PostgreSQL article/profile draft state, expiry, optimistic locking, resume/save/cancel/replace and existing-profile snapshots are covered by bot/unit and real PostgreSQL locale-preservation tests; real Telegram restart/resume UAT remains external |
+| R-004 Versioned journal requirements | VERIFIED | Lifecycle API/admin, immutable published versions and the exact pinned version used by a submission passed clean-database integration and E2E verification |
+| R-005 Immutable submission versions | VERIFIED | Real PostgreSQL/Redis E2E verified atomic idempotent initial submission, immutable revision v1/v2 rows and distinct object keys |
+| R-006 Secure file pipeline | VERIFIED | Nine real MinIO/ClamAV/LibreOffice assertions verified signature/MIME/size/EICAR/AV failure/quarantine/promotion/version recovery/DOCX rendering, SHA-256 and SSE; runtime report retained by CI |
 | R-007 Controlled workflow state machine | VERIFIED | Exhaustive unit tests enumerate every status, every allowed/forbidden edge, permissions, guards, and SUBMITTED/REGISTERED distinction |
-| R-008 Atomic history/audit/outbox transition | IMPLEMENTED | Serializable repository plus exhaustive all-edge atomic integration assertions; PostgreSQL execution pending |
+| R-008 Atomic history/audit/outbox transition | VERIFIED | Real PostgreSQL integration exercised every allowed edge and verified status, history, hash-chained audit and notification outbox atomically; invalid edges left no partial writes |
 | R-009 SUBMITTED/REGISTERED versus ACCEPTED | VERIFIED | Canonical status model, negative transition test, distinct localized wording |
-| R-010 Staff auth, 2FA, RBAC, scopes | TESTED | Argon2/TOTP/session/CSRF/scope implementation, exact role-permission unit matrix, exhaustive HTTP RBAC and lockout/session integration specs; live execution pending |
+| R-010 Staff auth, 2FA, RBAC, scopes | VERIFIED | Real PostgreSQL/Redis HTTP integration verified Argon2/TOTP/session/CSRF, atomic brute-force lockout, exact role/resource matrix and journal-scope IDOR denial; rendered admin probe also passed |
 | R-011 Complete editorial admin | TESTED | Dashboard/submissions/files/messages/assignments/reviews/decisions/journals/users/translations/reports/audit/ops/privacy implemented, built and covered by a full-stack rendered-page probe; Academy browser UAT pending |
-| R-012 Reviews/assignments/deadlines/revisions | IMPLEMENTED | Assignment/reviewer APIs and UI, future-deadline/duplicate guards, audited anonymized derivative upload/full scan, reviewer acceptance/conflict isolation, configurable review counts, immutable revisions, persisted deadlines, four-eyes decisions |
-| R-013 Notification/document outbox | TESTED | BullMQ relay, backoff, lease recovery, provider receipts, template snapshots, DLQ/replay UI, localized PDF receipt generator, and real-Redis retry/duplicate/DLQ/restart suite; live execution pending |
-| R-014 OpenAPI typed API | IMPLEMENTED | Swagger UI/JSON exposes every public route and cookie auth while internal service routes are hidden; strict typed Zod DTOs, uniform errors, pagination/filtering/sorting, and an OpenAPI runtime probe are present |
-| R-015 Immutable audit | IMPLEMENTED | Scoped append-only API, hash chain, actor/request/network hashes; DB privilege test pending |
-| R-016 Security controls/log minimization | TESTED | Headers, CSRF, validation, rate limiting, production placeholder rejection, query/PII-minimized logs, traversal/header-safe filenames, XSS-safe Telegram rendering, and local security tests |
-| R-017 Observability/health/alerts | IMPLEMENTED | Structured logs, echoed request IDs, API/worker metrics, dependency-aware probes, Sentry, Prometheus/Alertmanager rules and fault-injection harness; live drill pending |
-| R-018 Backup/restore | IMPLEMENTED | Encrypted restic DB+object backup, timestamp/size/checksum manifest, pre-restore checksum enforcement, separate recovery DB/S3 and application smoke harness; execution pending |
-| R-019 One-command local deployment | IMPLEMENTED | Compose graph, automatic migration and isolated `pnpm verify:runtime` acceptance command supplied; Docker is physically unavailable on this host |
-| R-020 CI gates | IMPLEMENTED | Required quality, PostgreSQL/Redis integration and full Compose runtime jobs; all enforce zero skips and feed the required aggregator; candidate-SHA hosted run pending |
-| R-021 Schema/migrations/constraints/indexes | IMPLEMENTED | Prisma schema and nine ordered migrations; clean PostgreSQL application pending |
-| R-022 Safe idempotent seed | IMPLEMENTED | Production refusal, synthetic identities/journals, CI twice-run gate; real CI run pending |
-| R-023 Reports/authorized exports | IMPLEMENTED | Scoped overview and formula-safe non-PII audited CSV export |
-| R-024 Data-subject/retention/legal hold | IMPLEMENTED | Author case API/bot, admin transition workflow, scoped permissions, audit/notifications, legal holds and retention execution guard; real DB integration and Academy policy approval pending |
-| R-025 Documentation/runbooks | IMPLEMENTED | README, architecture, deployment, admin, security, backup/restore, ADRs, decisions, release checklist |
-| AC-001 through AC-025 | IN_PROGRESS | Per-scenario evidence register in `tests/acceptance/README.md`; full DB/runtime/staging acceptance and UAT pending |
+| R-012 Reviews/assignments/deadlines/revisions | VERIFIED | Real editorial lifecycle E2E verified assignment, reviewer isolation, configurable review completion, deadline/revision path, immutable v1/v2, four-eyes acceptance and independent rejection branch |
+| R-013 Notification/document outbox | VERIFIED | Real Redis suite verified duplicate suppression, exponential retry, terminal DLQ retention and graceful worker restart; E2E verified persisted notification outbox and localized document path |
+| R-014 OpenAPI typed API | VERIFIED | Live Compose probe verified Swagger UI/JSON, typed public routes and cookie auth while internal service routes remained hidden; schema/DTO/error/pagination contracts also passed build/typecheck |
+| R-015 Immutable audit | TESTED | Append-only API, hash chain, actor/request/network hashes and atomic audit creation passed unit/integration/E2E; final production database-role grants remain an operator deployment check |
+| R-016 Security controls/log minimization | VERIFIED | Headers, CSRF, validation, rate limiting, fail-closed production secrets, minimized structured logs, filename/HTML safety, public-history/secret/dependency scans and CodeQL passed with zero open alerts |
+| R-017 Observability/health/alerts | VERIFIED | Live Compose verified API/bot/worker readiness, structured request IDs/logs and dependency-aware failure/recovery for PostgreSQL, Redis, S3 and ClamAV; metrics and alert rules passed repository gates |
+| R-018 Backup/restore | VERIFIED | CI created encrypted PostgreSQL/object backups, verified manifests/checksums, restored into isolated DB/S3, proved row counts plus actual object SHA-256/size/SSE, and passed restored-API readiness/application smoke |
+| R-019 One-command local deployment | VERIFIED | A clean Ubuntu 24 GitHub runner built and started the complete Compose graph through `pnpm verify:runtime`; all 62 runtime checks passed |
+| R-020 CI gates | VERIFIED | Main CI run 34313143644 passed required quality, clean migration/seed, 21 integration, 3 E2E and 62-step runtime jobs with zero skips; required aggregator passed |
+| R-021 Schema/migrations/constraints/indexes | VERIFIED | Nine ordered Prisma migrations applied from zero, migration status/schema-drift check passed, and real constraint/transaction tests passed |
+| R-022 Safe idempotent seed | VERIFIED | CI executed the synthetic development seed twice against a clean database; the production refusal gate remains enforced |
+| R-023 Reports/authorized exports | TESTED | Scoped overview and formula-safe non-PII audited CSV export passed build/RBAC surface verification; Academy report-format UAT remains external |
+| R-024 Data-subject/retention/legal hold | TESTED | Real DB integration verified durable owner-scoped requests, masking, case transitions, legal holds and unapproved-retention guard; Academy policy approval remains external |
+| R-025 Documentation/runbooks | VERIFIED | README, architecture, deployment, admin, security, backup/restore, ADRs, decisions, public contribution/security documents and release checklist were reviewed against the implementation |
+| AC-001 through AC-025 | TESTED | Per-scenario evidence register in `tests/acceptance/README.md`; automated DB/runtime acceptance is complete where listed, while real Telegram, Academy browser/linguistic/policy UAT and staging sign-off remain external |
 | Academy approvals, staging and production prerequisites | BLOCKED_EXTERNAL | Product owners, official policies/translations, BotFather/domain/TLS/secrets, staging and operations owners are external |
 
 ## Latest verification run
 
-Local verification on 2026-09-09:
+GitHub Actions main CI [run 34313143644](https://github.com/lilcipherx/hmqa-jurnal-bot/actions/runs/34313143644) on 2026-09-09 verified implementation commit `f0e4b1dc6ae9c94f28ee355452aa9ab81a387d0b`:
 
-- `pnpm format:check`, `pnpm lint`, and `pnpm typecheck`: passed after the latest security/runtime changes;
-- `pnpm test`: 16 files / 96 tests passed;
-- `pnpm test:i18n`: 1 file / 7 tests passed;
-- integration discovery: 7 files / 20 tests, all skipped only in the non-required convenience run because runtime services are absent;
-- E2E discovery: 2 files / 3 tests, all skipped for the same reason;
-- required integration/E2E/runtime commands fail closed on missing services and CI runs them with real dependencies;
-- the full build, format, Prisma, secret and dependency gates are repeated immediately before the baseline commit;
-- Docker, Docker Compose, `psql`, and Redis CLI are absent. Node.js 24.18.0 and pnpm 11.19.0 are present. A standard `wsl --install --distribution Ubuntu-24.04 --no-launch` attempt failed with `0xc03a0014` (virtual-disk support provider unavailable), which requires host administration/component enablement and reboot;
-- `pnpm verify:runtime` failed closed at its first preflight with `spawnSync docker ENOENT` and wrote a `FAILED` JSON evidence report; the three required suite commands likewise rejected missing runtime variables instead of skipping;
-- therefore Compose execution, 20 integration tests, 3 E2E tests, 9 full-runtime assertions, backup/restore, live probes and fault injection are **not** claimed as passed on this host. Git is initialized on `main`; exact baseline SHA/state is reported from final Git evidence.
+- quality passed: frozen install, Prisma validation, Compose validation, format, lint, typecheck, build, 18 files / 105 unit tests, 7 i18n assertions, public-history and secret scans, and a moderate dependency audit;
+- integration passed against real PostgreSQL and Redis: 21/21 tests in 14 suites, with migrations applied from zero, schema-drift check and an idempotent twice-run seed;
+- E2E passed: 3/3 tests in 4 suites covered author submission plus both acceptance/publication and rejection editorial branches;
+- runtime passed in 336.88 seconds: 62/62 checks, including 9 real MinIO/ClamAV/LibreOffice assertions, the complete proxied stack, Telegram duplicate-update smoke, admin auth/RBAC/rendering, encrypted backup and isolated restore, actual DB/object SHA-256/size/SSE consistency, restored application smoke, dependency outage/recovery and graceful restarts;
+- the `required` aggregator passed. Runtime, integration and E2E required commands enforce zero skips and fail closed when a dependency is absent;
+- CodeQL passed for the same implementation line with zero open code-scanning alerts; secret-scanning and Dependabot security alert inventories were also zero.
+
+The Windows workstation itself does not provide Docker/Compose, `psql`, or `redis-cli`; this is no longer used as a substitute for runtime evidence because the complete suite passed on a clean Ubuntu 24 hosted runner. Real Academy staging, Telegram/BotFather, policy/translation approval and operations UAT remain external release gates.
