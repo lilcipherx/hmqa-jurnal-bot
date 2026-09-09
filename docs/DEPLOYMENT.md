@@ -74,6 +74,8 @@ ${EDITOR:-vi} .env
 docker compose --env-file .env config --quiet
 ```
 
+Set `DEPLOYED_SHA` to the exact 40-character CI-green checkout. Staging and production refuse the ambiguous `development` value. The API, bot, worker, and admin liveness responses expose this non-secret identifier so operators can prove that the checkout and every running application use the same release.
+
 Run the isolated acceptance drill before staging. It uses `.env.test.example`, never the production `.env`, and cleans only its run-specific project:
 
 ```bash

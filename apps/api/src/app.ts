@@ -454,7 +454,10 @@ export async function createApp({
     });
   }
 
-  app.get('/health/live', { schema: { tags: ['Operations'] } }, () => ({ status: 'ok' }));
+  app.get('/health/live', { schema: { tags: ['Operations'] } }, () => ({
+    status: 'ok',
+    version: config.DEPLOYED_SHA,
+  }));
   app.get('/health/ready', { schema: { tags: ['Operations'] } }, async (_request, reply) => {
     try {
       await Promise.all([

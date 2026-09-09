@@ -36,6 +36,7 @@ describe('environment validation', () => {
       loadConfig({
         ...base,
         NODE_ENV: 'production',
+        DEPLOYED_SHA: 'a'.repeat(40),
         APP_BASE_URL: 'https://api.hmqa.uz',
         ADMIN_BASE_URL: 'https://jurnal.hmqa.uz',
         BOT_BASE_URL: 'https://bot.hmqa.uz',
@@ -79,6 +80,30 @@ describe('environment validation', () => {
       expect(() => loadConfig(production)).toThrow(name);
     },
   );
+
+  it('requires an exact deployed Git SHA outside development and test', () => {
+    expect(() =>
+      loadConfig({
+        ...base,
+        NODE_ENV: 'staging',
+        DEPLOYED_SHA: 'development',
+        APP_BASE_URL: 'https://api.hmqa.uz',
+        ADMIN_BASE_URL: 'https://jurnal.hmqa.uz',
+        BOT_BASE_URL: 'https://bot.hmqa.uz',
+        DATABASE_URL: 'postgresql://hmqa:strong-password@db.internal:5432/hmqa',
+        REDIS_URL: 'rediss://hmqa:strong-password@redis.internal:6379/0',
+        TELEGRAM_BOT_TOKEN: `123456:${'A'.repeat(32)}`,
+        TELEGRAM_WEBHOOK_SECRET: 'w'.repeat(32),
+        S3_ENDPOINT: 'https://objects.internal',
+        S3_ACCESS_KEY: 'hmqa-production-access',
+        S3_SECRET_KEY: 's'.repeat(32),
+        SERVICE_AUTH_SECRET: 'a'.repeat(32),
+        SESSION_SECRET: 'b'.repeat(32),
+        ENCRYPTION_KEY: 'c'.repeat(32),
+        METRICS_TOKEN: 'm'.repeat(32),
+      }),
+    ).toThrow('DEPLOYED_SHA');
+  });
 
   it('enforces the Telegram cloud download ceiling', () => {
     expect(() => loadConfig({ ...base, FILE_MAX_BYTES: String(20 * 1024 * 1024) })).toThrow(

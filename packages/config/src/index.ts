@@ -5,6 +5,10 @@ const bool = z.enum(['true', 'false']).transform((value) => value === 'true');
 const schema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
+    DEPLOYED_SHA: z
+      .string()
+      .regex(/^(?:development|[a-f0-9]{40})$/)
+      .default('development'),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
     APP_TIMEZONE: z.string().default('Asia/Tashkent'),
     DEFAULT_LOCALE: z.enum(['uz-Latn', 'ru', 'en']).default('uz-Latn'),
@@ -58,6 +62,13 @@ const schema = z
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV === 'production' || value.NODE_ENV === 'staging') {
+      if (!/^[a-f0-9]{40}$/.test(value.DEPLOYED_SHA)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['DEPLOYED_SHA'],
+          message: 'must be the exact 40-character Git SHA outside development/test',
+        });
+      }
       const placeholderPattern = /replace-with|changeme|test-only|example\.invalid/i;
       for (const [name, secret] of [
         ['TELEGRAM_WEBHOOK_SECRET', value.TELEGRAM_WEBHOOK_SECRET],

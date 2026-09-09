@@ -196,7 +196,7 @@ for (const [worker, queue] of [
   });
 
 const app = Fastify({ loggerInstance: logger });
-app.get('/health/live', () => ({ status: 'ok' }));
+app.get('/health/live', () => ({ status: 'ok', version: config.DEPLOYED_SHA }));
 app.get('/health/ready', async (_request, reply) => {
   try {
     await Promise.all([

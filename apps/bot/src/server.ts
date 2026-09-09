@@ -21,7 +21,7 @@ const api = new HmqaApiClient(config.APP_BASE_URL, config.SERVICE_AUTH_SECRET);
 const bot = createBot(config.TELEGRAM_BOT_TOKEN, api, config.BOT_API_BASE_URL);
 const telegramUpdateSchema = z.object({ update_id: z.number().int().nonnegative() }).passthrough();
 
-app.get('/health/live', () => ({ status: 'ok' }));
+app.get('/health/live', () => ({ status: 'ok', version: config.DEPLOYED_SHA }));
 app.get('/health/ready', async (_request, reply) => {
   try {
     const [, apiResponse] = await Promise.all([

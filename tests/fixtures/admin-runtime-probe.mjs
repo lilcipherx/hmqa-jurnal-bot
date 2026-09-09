@@ -174,6 +174,18 @@ const traced = await expectStatus(
 );
 if (traced.headers.get('x-request-id') !== traceId)
   throw new Error('API did not echo the validated request/correlation ID');
+const expectedVersion = process.env.DEPLOYED_SHA ?? 'development';
+const apiLive = await traced.json();
+if (apiLive.version !== expectedVersion) throw new Error('API reported an unexpected build SHA');
+for (const [service, url] of [
+  ['bot', 'http://bot:3002/health/live'],
+  ['worker', 'http://worker:3003/health/live'],
+  ['admin', `${webBase}/health/live`],
+]) {
+  const live = await (await expectStatus(globalThis.fetch(url), 200, `${service} liveness`)).json();
+  if (live.version !== expectedVersion)
+    throw new Error(`${service} reported an unexpected build SHA`);
+}
 const apiMetrics = await (
   await expectStatus(globalThis.fetch(`${apiBase}/metrics`), 200, 'API metrics')
 ).text();
