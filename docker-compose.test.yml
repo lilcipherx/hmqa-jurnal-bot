@@ -112,8 +112,10 @@ services:
         mc mb --ignore-existing recovery/hmqa-test-recovery
         mc anonymous set none recovery/hmqa-test-recovery
         mc version enable recovery/hmqa-test-recovery
+        mc encrypt set sse-s3 recovery/hmqa-test-recovery
         mc mb --ignore-existing recovery/hmqa-test-recovery-quarantine
         mc anonymous set none recovery/hmqa-test-recovery-quarantine
+        mc encrypt set sse-s3 recovery/hmqa-test-recovery-quarantine
     networks: [backend]
 
   api-recovery:

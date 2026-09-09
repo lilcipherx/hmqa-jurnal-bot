@@ -69,6 +69,10 @@ assert(
   Boolean(base.services.minio?.environment?.MINIO_KMS_SECRET_KEY),
   'MinIO must require a KMS secret key for server-side encryption',
 );
+assert(
+  String(base.services['minio-init']?.command).includes('mc encrypt set sse-s3'),
+  'Production MinIO buckets must enforce default server-side encryption',
+);
 assert(base.networks?.backend, 'Backend network is missing');
 
 for (const service of [
@@ -96,6 +100,10 @@ assert(
 assert(
   Boolean(test.services['minio-recovery']?.environment?.MINIO_KMS_SECRET_KEY),
   'Recovery MinIO must enable server-side encryption',
+);
+assert(
+  String(test.services['minio-recovery-init']?.command).includes('mc encrypt set sse-s3'),
+  'Recovery MinIO buckets must enforce default server-side encryption',
 );
 
 assert(
