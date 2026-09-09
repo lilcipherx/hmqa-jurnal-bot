@@ -86,7 +86,7 @@ jobs:
       - name: Verify migration status and schema drift
         run: |
           pnpm --filter @hmqa/database exec prisma migrate status
-          pnpm --filter @hmqa/database exec prisma migrate diff --exit-code --from-schema packages/database/prisma/schema.prisma --to-config-datasource
+          pnpm --filter @hmqa/database exec prisma migrate diff --exit-code --from-schema prisma/schema.prisma --to-config-datasource
       - name: Verify idempotent development seed
         env:
           SEED_ADMIN_EMAIL: ci-admin@example.invalid
