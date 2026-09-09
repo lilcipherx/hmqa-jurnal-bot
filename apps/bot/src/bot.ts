@@ -7,7 +7,6 @@ import {
 } from '@hmqa/i18n';
 import {
   journalRequirementConfigSchema,
-  orcidSchema,
   type JournalMetadataPolicy,
   type JournalRequirementFilePolicy,
 } from '@hmqa/contracts';
@@ -41,12 +40,10 @@ export type BotApi = Pick<
   | 'releaseUpdate'
   | 'syncUser'
   | 'setLocale'
+  | 'getTelegramContent'
   | 'createProfileDraft'
   | 'finalizeProfileDraft'
   | 'recordConsent'
-  | 'listConsents'
-  | 'listPrivacyRequests'
-  | 'createPrivacyRequest'
   | 'listJournals'
   | 'createDraft'
   | 'updateDraft'
@@ -76,18 +73,101 @@ function languageKeyboard() {
     .text('English', 'lang:en');
 }
 
+const degreeCodes = [
+  'NONE',
+  'PHD',
+  'DSC',
+  'CANDIDATE_OF_SCIENCES',
+  'DOCTOR_OF_SCIENCES',
+  'OTHER',
+] as const;
+const titleCodes = [
+  'NONE',
+  'PROFESSOR',
+  'ASSOCIATE_PROFESSOR',
+  'SENIOR_RESEARCHER',
+  'OTHER',
+] as const;
+
+function degreeLabel(locale: Locale, code: string, custom?: unknown): string {
+  if (code === 'OTHER' && typeof custom === 'string') return custom;
+  const normalized = degreeCodes.includes(code as (typeof degreeCodes)[number])
+    ? code.toLowerCase()
+    : 'none';
+  return translate(locale, `degree.${normalized}` as TranslationKey);
+}
+
+function titleLabel(locale: Locale, code: string, custom?: unknown): string {
+  if (code === 'OTHER' && typeof custom === 'string') return custom;
+  const normalized = titleCodes.includes(code as (typeof titleCodes)[number])
+    ? code.toLowerCase()
+    : 'none';
+  return translate(locale, `title.${normalized}` as TranslationKey);
+}
+
+function degreeKeyboard(locale: Locale, prefix: 'AUTHOR' | 'PROFILE'): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  for (const code of degreeCodes)
+    keyboard.text(degreeLabel(locale, code), `profile-choice:degree:${prefix}:${code}`).row();
+  return keyboard;
+}
+
+function titleKeyboard(locale: Locale, prefix: 'AUTHOR' | 'PROFILE'): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  for (const code of titleCodes)
+    keyboard.text(titleLabel(locale, code), `profile-choice:title:${prefix}:${code}`).row();
+  return keyboard;
+}
+
+function helpKeyboard(locale: Locale): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(translate(locale, 'help.submit.label'), 'help:submit')
+    .row()
+    .text(translate(locale, 'help.files.label'), 'help:files')
+    .row()
+    .text(translate(locale, 'help.statuses.label'), 'help:statuses')
+    .row()
+    .text(translate(locale, 'help.revision.label'), 'help:revision')
+    .row()
+    .text(translate(locale, 'help.contact.label'), 'help:contact');
+}
+
+async function showHelp(ctx: Context, locale: Locale) {
+  return ctx.reply(translate(locale, 'help.summary'), { reply_markup: helpKeyboard(locale) });
+}
+
+async function showContact(ctx: Context, api: BotApi, locale: Locale, journalId?: string) {
+  const { contact, content } = await api.getTelegramContent(locale, journalId);
+  const rows = [
+    contact.phone ? `${translate(locale, 'contact.phone')}: ${contact.phone}` : null,
+    contact.email ? `${translate(locale, 'contact.email')}: ${contact.email}` : null,
+    contact.telegram ? `${translate(locale, 'contact.telegram')}: ${contact.telegram}` : null,
+    contact.address ? `${translate(locale, 'contact.address')}: ${contact.address}` : null,
+    contact.workingHours ? `${translate(locale, 'contact.hours')}: ${contact.workingHours}` : null,
+    contact.note,
+    content.HELP_CONTACT,
+  ].filter((row): row is string => Boolean(row));
+  return ctx.reply(
+    rows.length > 0
+      ? `${translate(locale, 'contact.heading')}\n\n${rows.join('\n')}`
+      : translate(locale, 'contact.not_configured'),
+  );
+}
+
 export function mainMenu(locale: Locale) {
   return new Keyboard()
     .text(translate(locale, 'menu.submit_article'))
-    .text(translate(locale, 'menu.journals'))
-    .row()
     .text(translate(locale, 'menu.my_articles'))
-    .text(translate(locale, 'menu.notifications'))
+    .row()
+    .text(translate(locale, 'menu.journals'))
+    .text(translate(locale, 'journal.requirements'))
     .row()
     .text(translate(locale, 'menu.profile'))
-    .text(translate(locale, 'menu.help'))
+    .text(translate(locale, 'menu.notifications'))
     .row()
+    .text(translate(locale, 'menu.help'))
     .text(translate(locale, 'menu.contact'))
+    .row()
     .text(translate(locale, 'menu.language'))
     .resized()
     .persistent();
@@ -98,13 +178,14 @@ export function botCommands(locale: Locale) {
     { command: 'start', description: translate(locale, 'bot.command.start') },
     { command: 'help', description: translate(locale, 'bot.command.help') },
     { command: 'journals', description: translate(locale, 'bot.command.journals') },
+    { command: 'requirements', description: translate(locale, 'bot.command.requirements') },
     { command: 'submit', description: translate(locale, 'bot.command.submit') },
     { command: 'drafts', description: translate(locale, 'bot.command.drafts') },
+    { command: 'articles', description: translate(locale, 'bot.command.articles') },
     { command: 'status', description: translate(locale, 'bot.command.status') },
     { command: 'profile', description: translate(locale, 'bot.command.profile') },
     { command: 'language', description: translate(locale, 'bot.command.language') },
     { command: 'cancel', description: translate(locale, 'bot.command.cancel') },
-    { command: 'privacy', description: translate(locale, 'bot.command.privacy') },
   ];
 }
 
@@ -131,31 +212,21 @@ function requirementMetadataPolicy(draft: DraftState): JournalMetadataPolicy | n
 
 function statePrompt(locale: Locale, state: string, draft?: DraftState): string {
   const prompts: Record<string, TranslationKey> = {
-    AUTHOR_LAST_NAME: 'author.last_name',
-    AUTHOR_FIRST_NAME: 'author.first_name',
-    AUTHOR_MIDDLE_NAME: 'author.middle_name',
+    AUTHOR_FULL_NAME: 'author.full_name',
     AUTHOR_PHONE: 'author.phone',
     AUTHOR_EMAIL: 'author.email',
     AUTHOR_ORGANIZATION: 'author.organization',
     AUTHOR_POSITION: 'author.position',
-    AUTHOR_DEGREE: 'author.degree',
-    AUTHOR_ACADEMIC_TITLE: 'author.academic_title',
-    AUTHOR_COUNTRY: 'author.country',
-    AUTHOR_CITY: 'author.city',
-    AUTHOR_ORCID: 'author.orcid',
+    AUTHOR_DEGREE_CUSTOM: 'author.degree_custom',
+    AUTHOR_TITLE_CUSTOM: 'author.title_custom',
     AUTHOR_COAUTHORS: 'author.coauthors',
-    PROFILE_LAST_NAME: 'author.last_name',
-    PROFILE_FIRST_NAME: 'author.first_name',
-    PROFILE_MIDDLE_NAME: 'author.middle_name',
+    PROFILE_FULL_NAME: 'author.full_name',
     PROFILE_PHONE: 'author.phone',
     PROFILE_EMAIL: 'author.email',
     PROFILE_ORGANIZATION: 'author.organization',
     PROFILE_POSITION: 'author.position',
-    PROFILE_DEGREE: 'author.degree',
-    PROFILE_ACADEMIC_TITLE: 'author.academic_title',
-    PROFILE_COUNTRY: 'author.country',
-    PROFILE_CITY: 'author.city',
-    PROFILE_ORCID: 'author.orcid',
+    PROFILE_DEGREE_CUSTOM: 'author.degree_custom',
+    PROFILE_TITLE_CUSTOM: 'author.title_custom',
     ARTICLE_TITLE: 'article.title',
     ARTICLE_TYPE: 'article.type',
     ARTICLE_LANGUAGE: 'article.language',
@@ -203,18 +274,39 @@ async function showConsent(ctx: Context, locale: Locale) {
   );
 }
 
-async function showMenu(ctx: Context, locale: Locale) {
-  await ctx.reply(translate(locale, 'menu.title'), { reply_markup: mainMenu(locale) });
+async function showMenu(ctx: Context, locale: Locale, api?: BotApi, includeWelcome = false) {
+  let support: string | null | undefined = null;
+  try {
+    support = api ? (await api.getTelegramContent(locale)).content.WELCOME_SUPPORT : null;
+  } catch {
+    // CMS availability must never prevent access to the durable main menu.
+  }
+  await ctx.reply(
+    [translate(locale, includeWelcome ? 'start.welcome' : 'menu.title'), support]
+      .filter(Boolean)
+      .join('\n\n'),
+    { reply_markup: mainMenu(locale) },
+  );
 }
 
-async function showJournals(ctx: Context, api: BotApi, locale: Locale, forSubmission = false) {
+async function showJournals(
+  ctx: Context,
+  api: BotApi,
+  locale: Locale,
+  forSubmission = false,
+  forRequirements = false,
+) {
   const journals = await api.listJournals(locale);
   if (journals.length === 0) return ctx.reply(translate(locale, 'journal.list_empty'));
   const keyboard = new InlineKeyboard();
-  for (const journal of journals)
-    keyboard.text(journal.name, `${forSubmission ? 'choose' : 'journal'}:${journal.id}`).row();
+  const action = forSubmission ? 'choose' : forRequirements ? 'requirements' : 'journal';
+  for (const journal of journals) keyboard.text(journal.name, `${action}:${journal.id}`).row();
   return ctx.reply(
-    forSubmission ? translate(locale, 'menu.submit_article') : translate(locale, 'menu.journals'),
+    forSubmission
+      ? translate(locale, 'menu.submit_article')
+      : forRequirements
+        ? translate(locale, 'journal.requirements')
+        : translate(locale, 'menu.journals'),
     { reply_markup: keyboard },
   );
 }
@@ -223,25 +315,26 @@ function preview(locale: Locale, draft: DraftState): string {
   const value = draft.context;
   const text = (input: unknown): string =>
     typeof input === 'string' || typeof input === 'number' ? String(input) : '';
-  const optional = (input: unknown): string => {
-    const result = text(input);
-    return !result || result === '-' ? translate(locale, 'common.not_specified') : result;
-  };
-  const authorName = [value.lastName, value.firstName, value.middleName]
-    .map(text)
-    .filter((part) => part && part !== '-')
-    .join(' ');
+  const authorName =
+    text(value.fullName) ||
+    [value.lastName, value.firstName, value.middleName]
+      .map(text)
+      .filter((part) => part && part !== '-')
+      .join(' ');
   const fields = [
     [translate(locale, 'submission.preview.author'), authorName],
     [translate(locale, 'submission.preview.phone'), maskPhone(text(value.phone))],
     [translate(locale, 'submission.preview.email'), maskEmail(text(value.email))],
     [translate(locale, 'submission.preview.organization'), text(value.organization)],
     [translate(locale, 'submission.preview.position'), text(value.position)],
-    [translate(locale, 'submission.preview.degree'), optional(value.degree)],
-    [translate(locale, 'submission.preview.academic_title'), optional(value.academicTitle)],
-    [translate(locale, 'submission.preview.country'), optional(value.country)],
-    [translate(locale, 'submission.preview.city'), optional(value.city)],
-    [translate(locale, 'submission.preview.orcid'), optional(value.orcid)],
+    [
+      translate(locale, 'submission.preview.degree'),
+      degreeLabel(locale, text(value.degreeCode), value.degreeCustom ?? value.degree),
+    ],
+    [
+      translate(locale, 'submission.preview.academic_title'),
+      titleLabel(locale, text(value.titleCode), value.titleCustom ?? value.academicTitle),
+    ],
     [translate(locale, 'submission.preview.coauthors'), text(value.coauthors)],
     [translate(locale, 'submission.preview.title'), text(value.articleTitle)],
     [translate(locale, 'submission.preview.article_type'), text(value.articleType)],
@@ -260,33 +353,24 @@ function profilePreview(
 ): string {
   const value = draft.context;
   const text = (input: unknown): string => (typeof input === 'string' ? input : '');
-  const optional = (input: unknown): string => {
-    const result = text(input);
-    return !result || result === '-' ? translate(locale, 'common.not_specified') : result;
-  };
   const fields = [
     [
-      translate(locale, 'submission.preview.author'),
-      [value.lastName, value.firstName, value.middleName]
-        .map(text)
-        .filter((part) => part && part !== '-')
-        .join(' '),
+      '👤',
+      text(value.fullName) ||
+        [value.lastName, value.firstName, value.middleName]
+          .map(text)
+          .filter((part) => part && part !== '-')
+          .join(' '),
     ],
-    [translate(locale, 'submission.preview.phone'), maskPhone(text(value.phone))],
-    [translate(locale, 'submission.preview.email'), maskEmail(text(value.email))],
-    [translate(locale, 'submission.preview.organization'), text(value.organization)],
-    [translate(locale, 'submission.preview.position'), text(value.position)],
-    [translate(locale, 'submission.preview.degree'), optional(value.degree)],
-    [translate(locale, 'submission.preview.academic_title'), optional(value.academicTitle)],
-    [translate(locale, 'submission.preview.country'), optional(value.country)],
-    [translate(locale, 'submission.preview.city'), optional(value.city)],
-    [translate(locale, 'submission.preview.orcid'), optional(value.orcid)],
+    ['📞', maskPhone(text(value.phone))],
+    ['✉️', maskEmail(text(value.email))],
+    ['🏢', text(value.organization)],
+    ['💼', text(value.position)],
+    ['🎓', degreeLabel(locale, text(value.degreeCode), value.degreeCustom ?? value.degree)],
+    ['🏅', titleLabel(locale, text(value.titleCode), value.titleCustom ?? value.academicTitle)],
   ];
   return `${escapeTelegramHtml(translate(locale, heading))}\n\n${fields
-    .map(
-      ([name, fieldValue]) =>
-        `<b>${escapeTelegramHtml(name!)}</b>: ${escapeTelegramHtml(fieldValue!)}`,
-    )
+    .map(([name, fieldValue]) => `${escapeTelegramHtml(name!)} ${escapeTelegramHtml(fieldValue!)}`)
     .join('\n')}`;
 }
 
@@ -384,25 +468,33 @@ async function continueDraft(ctx: Context, api: BotApi, locale: Locale, draft: D
   if (draft.machineState === 'PROFILE_SNAPSHOT') {
     return ctx.reply(profilePreview(locale, draft, 'profile.submission_snapshot'), {
       parse_mode: 'HTML',
-      reply_markup: new InlineKeyboard()
-        .text(
-          translate(locale, 'profile.use_snapshot'),
-          `draft:profile:confirm:${draft.id}:${draft.rowVersion}`,
-        )
-        .row()
-        .text(
-          translate(locale, 'profile.edit_for_submission'),
-          `draft:profile:edit:${draft.id}:${draft.rowVersion}`,
-        ),
+      reply_markup: appendDraftNavigation(
+        new InlineKeyboard()
+          .text(
+            translate(locale, 'profile.use_snapshot'),
+            `draft:profile:confirm:${draft.id}:${draft.rowVersion}`,
+          )
+          .row()
+          .text(
+            translate(locale, 'profile.edit_for_submission'),
+            `draft:profile:edit:${draft.id}:${draft.rowVersion}`,
+          ),
+        locale,
+        draft,
+      ),
     });
   }
   if (draft.machineState === 'PROFILE_CONFIRM') {
     return ctx.reply(profilePreview(locale, draft), {
       parse_mode: 'HTML',
-      reply_markup: new InlineKeyboard()
-        .text(translate(locale, 'profile.save'), `profile:save:${draft.id}:${draft.rowVersion}`)
-        .row()
-        .text(translate(locale, 'common.cancel'), 'draft:cancel'),
+      reply_markup: appendDraftNavigation(
+        new InlineKeyboard()
+          .text(translate(locale, 'profile.save'), `profile:save:${draft.id}:${draft.rowVersion}`)
+          .row()
+          .text(translate(locale, 'common.cancel'), 'draft:cancel'),
+        locale,
+        draft,
+      ),
     });
   }
   if (draft.machineState === 'REQUIREMENTS_ACK') {
@@ -415,10 +507,15 @@ async function continueDraft(ctx: Context, api: BotApi, locale: Locale, draft: D
       : undefined;
     const text = `${localization?.title ?? draft.journal?.code ?? ''}\n\n${localization?.summary ?? localization?.body ?? ''}\n\n${translate(locale, 'requirements.ack', { requirements_version: requirement?.version ?? '?', journal_name: journalLocalization?.name ?? draft.journal?.code ?? '?' })}`;
     return ctx.reply(text, {
-      reply_markup: new InlineKeyboard()
-        .text(translate(locale, 'common.confirm'), `draft:ack:${draft.id}:${draft.rowVersion}`)
-        .row()
-        .text(translate(locale, 'common.cancel'), 'draft:cancel'),
+      reply_markup: appendDraftNavigation(
+        new InlineKeyboard()
+          .text(translate(locale, 'common.confirm'), `draft:ack:${draft.id}:${draft.rowVersion}`)
+          .row()
+          .text(translate(locale, 'common.cancel'), 'draft:cancel'),
+        locale,
+        draft,
+        false,
+      ),
     });
   }
   if (draft.machineState === 'FILE_SCANNING') {
@@ -464,6 +561,7 @@ async function continueDraft(ctx: Context, api: BotApi, locale: Locale, draft: D
         .row();
       for (const row of replacementKeyboard(locale, updated).inline_keyboard)
         keyboard.add(...row).row();
+      appendDraftNavigation(keyboard, locale, updated);
       return ctx.reply(preview(locale, updated), { parse_mode: 'HTML', reply_markup: keyboard });
     }
     if (active && ['INFECTED', 'SUSPICIOUS', 'ERROR', 'TIMEOUT'].includes(active.file.scanStatus))
@@ -492,7 +590,10 @@ async function continueDraft(ctx: Context, api: BotApi, locale: Locale, draft: D
     const maximum = fileLimit(draft, policy);
     const keyboard = new Keyboard()
       .text(translate(locale, 'common.save_draft'))
-      .text(translate(locale, 'common.cancel'));
+      .text(translate(locale, 'common.cancel'))
+      .row()
+      .text(translate(locale, 'common.back'))
+      .text(translate(locale, 'common.home'));
     if (!policy.required) keyboard.row().text(translate(locale, 'common.skip'));
     return ctx.reply(
       translate(locale, 'file.upload_category', {
@@ -515,9 +616,31 @@ async function continueDraft(ctx: Context, api: BotApi, locale: Locale, draft: D
       .row();
     for (const row of replacementKeyboard(locale, draft).inline_keyboard)
       keyboard.add(...row).row();
+    appendDraftNavigation(keyboard, locale, draft);
     return ctx.reply(preview(locale, draft), {
       parse_mode: 'HTML',
       reply_markup: keyboard,
+    });
+  }
+  if (draft.machineState === 'AUTHOR_DEGREE' || draft.machineState === 'PROFILE_DEGREE') {
+    return ctx.reply(translate(locale, 'author.degree_select'), {
+      reply_markup: appendDraftNavigation(
+        degreeKeyboard(locale, draft.machineState.startsWith('AUTHOR_') ? 'AUTHOR' : 'PROFILE'),
+        locale,
+        draft,
+      ),
+    });
+  }
+  if (
+    draft.machineState === 'AUTHOR_ACADEMIC_TITLE' ||
+    draft.machineState === 'PROFILE_ACADEMIC_TITLE'
+  ) {
+    return ctx.reply(translate(locale, 'author.title_select'), {
+      reply_markup: appendDraftNavigation(
+        titleKeyboard(locale, draft.machineState.startsWith('AUTHOR_') ? 'AUTHOR' : 'PROFILE'),
+        locale,
+        draft,
+      ),
     });
   }
   if (draft.machineState === 'ARTICLE_LANGUAGE') {
@@ -529,6 +652,9 @@ async function continueDraft(ctx: Context, api: BotApi, locale: Locale, draft: D
         .row()
         .text(translate(locale, 'common.save_draft'))
         .text(translate(locale, 'common.cancel'))
+        .row()
+        .text(translate(locale, 'common.back'))
+        .text(translate(locale, 'common.home'))
         .resized(),
     });
   }
@@ -536,23 +662,25 @@ async function continueDraft(ctx: Context, api: BotApi, locale: Locale, draft: D
     reply_markup: new Keyboard()
       .text(translate(locale, 'common.save_draft'))
       .text(translate(locale, 'common.cancel'))
+      .row()
+      .text(translate(locale, 'common.back'))
+      .text(translate(locale, 'common.home'))
       .resized(),
   });
 }
 
 const textSteps: Readonly<Record<string, { field: string; next: string; expected: string }>> = {
-  AUTHOR_LAST_NAME: { field: 'lastName', next: 'AUTHOR_FIRST_NAME', expected: 'TEXT' },
-  AUTHOR_FIRST_NAME: { field: 'firstName', next: 'AUTHOR_MIDDLE_NAME', expected: 'TEXT' },
-  AUTHOR_MIDDLE_NAME: { field: 'middleName', next: 'AUTHOR_PHONE', expected: 'TEXT' },
+  AUTHOR_FULL_NAME: { field: 'fullName', next: 'AUTHOR_PHONE', expected: 'TEXT' },
   AUTHOR_PHONE: { field: 'phone', next: 'AUTHOR_EMAIL', expected: 'TEXT' },
   AUTHOR_EMAIL: { field: 'email', next: 'AUTHOR_ORGANIZATION', expected: 'TEXT' },
   AUTHOR_ORGANIZATION: { field: 'organization', next: 'AUTHOR_POSITION', expected: 'TEXT' },
-  AUTHOR_POSITION: { field: 'position', next: 'AUTHOR_DEGREE', expected: 'TEXT' },
-  AUTHOR_DEGREE: { field: 'degree', next: 'AUTHOR_ACADEMIC_TITLE', expected: 'TEXT' },
-  AUTHOR_ACADEMIC_TITLE: { field: 'academicTitle', next: 'AUTHOR_COUNTRY', expected: 'TEXT' },
-  AUTHOR_COUNTRY: { field: 'country', next: 'AUTHOR_CITY', expected: 'TEXT' },
-  AUTHOR_CITY: { field: 'city', next: 'AUTHOR_ORCID', expected: 'TEXT' },
-  AUTHOR_ORCID: { field: 'orcid', next: 'AUTHOR_COAUTHORS', expected: 'TEXT' },
+  AUTHOR_POSITION: { field: 'position', next: 'AUTHOR_DEGREE', expected: 'CALLBACK' },
+  AUTHOR_DEGREE_CUSTOM: {
+    field: 'degreeCustom',
+    next: 'AUTHOR_ACADEMIC_TITLE',
+    expected: 'CALLBACK',
+  },
+  AUTHOR_TITLE_CUSTOM: { field: 'titleCustom', next: 'AUTHOR_COAUTHORS', expected: 'TEXT' },
   AUTHOR_COAUTHORS: { field: 'coauthors', next: 'ARTICLE_TITLE', expected: 'TEXT' },
   ARTICLE_TITLE: { field: 'articleTitle', next: 'ARTICLE_TYPE', expected: 'TEXT' },
   ARTICLE_TYPE: { field: 'articleType', next: 'ARTICLE_LANGUAGE', expected: 'TEXT' },
@@ -563,38 +691,109 @@ const textSteps: Readonly<Record<string, { field: string; next: string; expected
 };
 
 const profileTextFields: Readonly<Record<string, string>> = {
-  PROFILE_LAST_NAME: 'lastName',
-  PROFILE_FIRST_NAME: 'firstName',
-  PROFILE_MIDDLE_NAME: 'middleName',
+  PROFILE_FULL_NAME: 'fullName',
   PROFILE_PHONE: 'phone',
   PROFILE_EMAIL: 'email',
   PROFILE_ORGANIZATION: 'organization',
   PROFILE_POSITION: 'position',
-  PROFILE_DEGREE: 'degree',
-  PROFILE_ACADEMIC_TITLE: 'academicTitle',
-  PROFILE_COUNTRY: 'country',
-  PROFILE_CITY: 'city',
-  PROFILE_ORCID: 'orcid',
+  PROFILE_DEGREE_CUSTOM: 'degreeCustom',
+  PROFILE_TITLE_CUSTOM: 'titleCustom',
 };
 
 function nextProfileState(draft: DraftState): string {
   const section = draft.context.profileSection;
   const all = section === 'all';
   const transitions: Readonly<Record<string, string>> = {
-    PROFILE_LAST_NAME: 'PROFILE_FIRST_NAME',
-    PROFILE_FIRST_NAME: 'PROFILE_MIDDLE_NAME',
-    PROFILE_MIDDLE_NAME: all ? 'PROFILE_PHONE' : 'PROFILE_CONFIRM',
+    PROFILE_FULL_NAME: all ? 'PROFILE_PHONE' : 'PROFILE_CONFIRM',
     PROFILE_PHONE: all ? 'PROFILE_EMAIL' : 'PROFILE_CONFIRM',
     PROFILE_EMAIL: all ? 'PROFILE_ORGANIZATION' : 'PROFILE_CONFIRM',
-    PROFILE_ORGANIZATION: 'PROFILE_POSITION',
-    PROFILE_POSITION: 'PROFILE_COUNTRY',
-    PROFILE_COUNTRY: 'PROFILE_CITY',
-    PROFILE_CITY: all ? 'PROFILE_DEGREE' : 'PROFILE_CONFIRM',
-    PROFILE_DEGREE: 'PROFILE_ACADEMIC_TITLE',
-    PROFILE_ACADEMIC_TITLE: 'PROFILE_ORCID',
-    PROFILE_ORCID: 'PROFILE_CONFIRM',
+    PROFILE_ORGANIZATION: all ? 'PROFILE_POSITION' : 'PROFILE_CONFIRM',
+    PROFILE_POSITION: all ? 'PROFILE_DEGREE' : 'PROFILE_CONFIRM',
+    PROFILE_DEGREE_CUSTOM: all ? 'PROFILE_ACADEMIC_TITLE' : 'PROFILE_CONFIRM',
+    PROFILE_TITLE_CUSTOM: 'PROFILE_CONFIRM',
   };
   return transitions[draft.machineState] ?? 'PROFILE_CONFIRM';
+}
+
+function previousDraftStep(
+  draft: DraftState,
+): { machineState: string; expectedInputType: string } | null {
+  if (draft.machineState === 'PROFILE_CONFIRM') {
+    const stateBySection: Readonly<Record<string, string>> = {
+      all: 'PROFILE_ACADEMIC_TITLE',
+      name: 'PROFILE_FULL_NAME',
+      phone: 'PROFILE_PHONE',
+      email: 'PROFILE_EMAIL',
+      organization: 'PROFILE_ORGANIZATION',
+      position: 'PROFILE_POSITION',
+      degree: 'PROFILE_DEGREE',
+      title: 'PROFILE_ACADEMIC_TITLE',
+    };
+    const profileSection = draft.context.profileSection;
+    const machineState =
+      stateBySection[typeof profileSection === 'string' ? profileSection : 'all'] ??
+      'PROFILE_ACADEMIC_TITLE';
+    return {
+      machineState,
+      expectedInputType: ['PROFILE_DEGREE', 'PROFILE_ACADEMIC_TITLE'].includes(machineState)
+        ? 'CALLBACK'
+        : 'TEXT',
+    };
+  }
+  const previous: Readonly<Record<string, { machineState: string; expectedInputType: string }>> = {
+    PROFILE_SNAPSHOT: { machineState: 'REQUIREMENTS_ACK', expectedInputType: 'CALLBACK' },
+    AUTHOR_FULL_NAME: { machineState: 'REQUIREMENTS_ACK', expectedInputType: 'CALLBACK' },
+    AUTHOR_PHONE: { machineState: 'AUTHOR_FULL_NAME', expectedInputType: 'TEXT' },
+    AUTHOR_EMAIL: { machineState: 'AUTHOR_PHONE', expectedInputType: 'TEXT' },
+    AUTHOR_ORGANIZATION: { machineState: 'AUTHOR_EMAIL', expectedInputType: 'TEXT' },
+    AUTHOR_POSITION: { machineState: 'AUTHOR_ORGANIZATION', expectedInputType: 'TEXT' },
+    AUTHOR_DEGREE: { machineState: 'AUTHOR_POSITION', expectedInputType: 'TEXT' },
+    AUTHOR_DEGREE_CUSTOM: { machineState: 'AUTHOR_DEGREE', expectedInputType: 'CALLBACK' },
+    AUTHOR_ACADEMIC_TITLE: { machineState: 'AUTHOR_DEGREE', expectedInputType: 'CALLBACK' },
+    AUTHOR_TITLE_CUSTOM: { machineState: 'AUTHOR_ACADEMIC_TITLE', expectedInputType: 'CALLBACK' },
+    AUTHOR_COAUTHORS: { machineState: 'AUTHOR_ACADEMIC_TITLE', expectedInputType: 'CALLBACK' },
+    ARTICLE_TITLE: { machineState: 'AUTHOR_COAUTHORS', expectedInputType: 'TEXT' },
+    ARTICLE_TYPE: { machineState: 'ARTICLE_TITLE', expectedInputType: 'TEXT' },
+    ARTICLE_LANGUAGE: { machineState: 'ARTICLE_TYPE', expectedInputType: 'TEXT' },
+    ARTICLE_SECTION: { machineState: 'ARTICLE_LANGUAGE', expectedInputType: 'TEXT' },
+    ARTICLE_ABSTRACT: { machineState: 'ARTICLE_SECTION', expectedInputType: 'TEXT' },
+    ARTICLE_KEYWORDS: { machineState: 'ARTICLE_ABSTRACT', expectedInputType: 'TEXT' },
+    FILE_ARTICLE: { machineState: 'ARTICLE_KEYWORDS', expectedInputType: 'TEXT' },
+    PREVIEW: { machineState: 'FILE_ARTICLE', expectedInputType: 'DOCUMENT' },
+    PROFILE_PHONE: { machineState: 'PROFILE_FULL_NAME', expectedInputType: 'TEXT' },
+    PROFILE_EMAIL: { machineState: 'PROFILE_PHONE', expectedInputType: 'TEXT' },
+    PROFILE_ORGANIZATION: { machineState: 'PROFILE_EMAIL', expectedInputType: 'TEXT' },
+    PROFILE_POSITION: { machineState: 'PROFILE_ORGANIZATION', expectedInputType: 'TEXT' },
+    PROFILE_DEGREE: { machineState: 'PROFILE_POSITION', expectedInputType: 'TEXT' },
+    PROFILE_DEGREE_CUSTOM: { machineState: 'PROFILE_DEGREE', expectedInputType: 'CALLBACK' },
+    PROFILE_ACADEMIC_TITLE: { machineState: 'PROFILE_DEGREE', expectedInputType: 'CALLBACK' },
+    PROFILE_TITLE_CUSTOM: {
+      machineState: 'PROFILE_ACADEMIC_TITLE',
+      expectedInputType: 'CALLBACK',
+    },
+  };
+  return previous[draft.machineState] ?? null;
+}
+
+function draftNavigation(locale: Locale, draft: DraftState, includeBack = true): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  if (includeBack && previousDraftStep(draft)) {
+    keyboard
+      .text(translate(locale, 'common.back'), `draft:back:${draft.id}:${draft.rowVersion}`)
+      .row();
+  }
+  return keyboard.text(translate(locale, 'common.home'), 'menu:home');
+}
+
+function appendDraftNavigation(
+  keyboard: InlineKeyboard,
+  locale: Locale,
+  draft: DraftState,
+  includeBack = true,
+): InlineKeyboard {
+  for (const row of draftNavigation(locale, draft, includeBack).inline_keyboard)
+    keyboard.add(...row).row();
+  return keyboard;
 }
 
 function profileKeyboard(locale: Locale, hasProfile: boolean): InlineKeyboard {
@@ -602,7 +801,7 @@ function profileKeyboard(locale: Locale, hasProfile: boolean): InlineKeyboard {
   if (!hasProfile) keyboard.text(translate(locale, 'profile.create'), 'profile:edit:all').row();
   else
     keyboard
-      .text(translate(locale, 'profile.edit_all'), 'profile:edit:all')
+      .text(translate(locale, 'profile.edit'), 'profile:edit:all')
       .row()
       .text(translate(locale, 'profile.edit_name'), 'profile:edit:name')
       .row()
@@ -610,29 +809,15 @@ function profileKeyboard(locale: Locale, hasProfile: boolean): InlineKeyboard {
       .row()
       .text(translate(locale, 'profile.edit_email'), 'profile:edit:email')
       .row()
-      .text(translate(locale, 'profile.edit_work'), 'profile:edit:work')
+      .text(translate(locale, 'profile.edit_organization'), 'profile:edit:organization')
       .row()
-      .text(translate(locale, 'profile.edit_academic'), 'profile:edit:academic')
+      .text(translate(locale, 'profile.edit_position'), 'profile:edit:position')
+      .row()
+      .text(translate(locale, 'profile.edit_degree'), 'profile:edit:degree')
+      .row()
+      .text(translate(locale, 'profile.edit_title'), 'profile:edit:title')
       .row();
-  return keyboard
-    .text(translate(locale, 'profile.consent_history'), 'profile:consents')
-    .row()
-    .text(translate(locale, 'profile.data_export_request'), 'privacy:create:ACCESS')
-    .row()
-    .text(translate(locale, 'profile.erasure_request'), 'privacy:confirm:ERASURE')
-    .row()
-    .text(translate(locale, 'profile.privacy_requests'), 'privacy:list');
-}
-
-function privacyKeyboard(locale: Locale): InlineKeyboard {
-  return new InlineKeyboard()
-    .text(translate(locale, 'profile.consent_history'), 'profile:consents')
-    .row()
-    .text(translate(locale, 'profile.data_export_request'), 'privacy:create:ACCESS')
-    .row()
-    .text(translate(locale, 'profile.erasure_request'), 'privacy:confirm:ERASURE')
-    .row()
-    .text(translate(locale, 'profile.privacy_requests'), 'privacy:list');
+  return keyboard.text(translate(locale, 'common.home'), 'menu:home');
 }
 
 async function showSubmissions(ctx: Context, api: BotApi, locale: Locale, telegramUserId: string) {
@@ -682,23 +867,16 @@ async function showNotifications(
 
 async function showProfile(ctx: Context, user: UserState, locale: Locale) {
   const profile = user.profile;
-  const optional = (value: string | null): string =>
-    value ?? translate(locale, 'common.not_specified');
   return ctx.reply(
     profile
       ? [
-          `${translate(locale, 'submission.preview.author')}: ${[profile.lastName, profile.firstName, profile.middleName].filter(Boolean).join(' ')}`,
-          `${translate(locale, 'submission.preview.phone')}: ${profile.phone}`,
-          `${translate(locale, 'submission.preview.email')}: ${profile.email}`,
-          `${translate(locale, 'submission.preview.organization')}: ${profile.organization}`,
-          `${translate(locale, 'submission.preview.position')}: ${profile.position}`,
-          `${translate(locale, 'submission.preview.degree')}: ${optional(profile.degree)}`,
-          `${translate(locale, 'submission.preview.academic_title')}: ${optional(profile.academicTitle)}`,
-          `${translate(locale, 'submission.preview.country')}: ${optional(profile.country)}`,
-          `${translate(locale, 'submission.preview.city')}: ${optional(profile.city)}`,
-          `${translate(locale, 'submission.preview.orcid')}: ${optional(profile.orcid)}`,
-          `${translate(locale, 'profile.interface_language')}: ${translate(locale, `language.${locale === 'uz-Latn' ? 'uz' : locale}` as TranslationKey)}`,
-          `${translate(locale, 'profile.updated_at')}: ${profile.updatedAt.toLocaleString(locale)}`,
+          `👤 ${profile.fullName}`,
+          `📞 ${profile.phone}`,
+          `✉️ ${profile.email}`,
+          `🏢 ${profile.organization}`,
+          `💼 ${profile.position}`,
+          `🎓 ${degreeLabel(locale, profile.degreeCode, profile.degreeCustom)}`,
+          `🏅 ${titleLabel(locale, profile.titleCode, profile.titleCustom)}`,
         ].join('\n')
       : translate(locale, 'profile.not_created'),
     { reply_markup: profileKeyboard(locale, Boolean(profile)) },
@@ -743,16 +921,16 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
       });
     if (!user.consentActive) return showConsent(ctx, user.locale);
     if (user.activeDraft) {
-      await showMenu(ctx, user.locale);
+      await showMenu(ctx, user.locale, api, true);
       return continueDraft(ctx, api, user.locale, user.activeDraft);
     }
-    return showMenu(ctx, user.locale);
+    return showMenu(ctx, user.locale, api, true);
   });
 
   bot.command('help', async (ctx) => {
     const user = await loadUser(ctx, api);
     const locale = user?.locale ?? normalizeLocale(ctx.from?.language_code);
-    return ctx.reply(translate(locale, 'help.summary'));
+    return showHelp(ctx, locale);
   });
 
   bot.command('language', async (ctx) => {
@@ -766,6 +944,11 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
   bot.command('journals', async (ctx) => {
     const user = await requireConsentedUser(ctx, api);
     if (user) return showJournals(ctx, api, user.locale!, false);
+  });
+
+  bot.command('requirements', async (ctx) => {
+    const user = await requireConsentedUser(ctx, api);
+    if (user) return showJournals(ctx, api, user.locale!, false, true);
   });
 
   bot.command('submit', async (ctx) => {
@@ -785,17 +968,14 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
     if (user && ctx.from) return showSubmissions(ctx, api, user.locale!, String(ctx.from.id));
   });
 
+  bot.command('articles', async (ctx) => {
+    const user = await requireConsentedUser(ctx, api);
+    if (user && ctx.from) return showSubmissions(ctx, api, user.locale!, String(ctx.from.id));
+  });
+
   bot.command('profile', async (ctx) => {
     const user = await requireConsentedUser(ctx, api);
     if (user) return showProfile(ctx, user, user.locale!);
-  });
-
-  bot.command('privacy', async (ctx) => {
-    const user = await requireConsentedUser(ctx, api);
-    if (user)
-      return ctx.reply(translate(user.locale!, 'privacy.menu'), {
-        reply_markup: privacyKeyboard(user.locale!),
-      });
   });
 
   bot.command('cancel', async (ctx) => {
@@ -804,7 +984,7 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
     if (!user.activeDraft) return ctx.reply(translate(user.locale!, 'submission.draft_empty'));
     await api.cancelDraft(String(ctx.from.id), user.activeDraft.id);
     await ctx.reply(translate(user.locale!, 'submission.draft_cancelled'));
-    return showMenu(ctx, user.locale!);
+    return showMenu(ctx, user.locale!, api);
   });
 
   bot.callbackQuery(/^lang:(uz|ru|en)$/, async (ctx) => {
@@ -820,19 +1000,95 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
     const granted = ctx.callbackQuery.data.endsWith('yes');
     await api.recordConsent(String(ctx.from.id), locale, granted);
     await ctx.answerCallbackQuery();
-    if (granted) return showMenu(ctx, locale);
+    if (granted) return showMenu(ctx, locale, api);
     return ctx.reply(translate(locale, 'consent.short'));
   });
 
-  bot.callbackQuery(/^profile:edit:(all|name|phone|email|work|academic)$/, async (ctx) => {
+  bot.callbackQuery('menu:home', async (ctx) => {
     const user = await loadUser(ctx, api);
     const locale = user?.locale ?? 'uz-Latn';
     await ctx.answerCallbackQuery();
-    if (!user?.consentActive) return showConsent(ctx, locale);
-    const section = ctx.match[1] as 'all' | 'name' | 'phone' | 'email' | 'work' | 'academic';
-    const draft = await api.createProfileDraft(String(ctx.from.id), section);
-    return continueDraft(ctx, api, locale, draft);
+    return showMenu(ctx, locale, api);
   });
+
+  bot.callbackQuery(/^help:(submit|files|statuses|revision|contact)$/, async (ctx) => {
+    const user = await loadUser(ctx, api);
+    const locale = user?.locale ?? 'uz-Latn';
+    const topic = ctx.match[1]!;
+    await ctx.answerCallbackQuery();
+    if (topic === 'contact') return showContact(ctx, api, locale);
+    const contentKey = {
+      submit: 'HELP_SUBMIT',
+      files: 'HELP_FILES',
+      statuses: 'HELP_STATUSES',
+      revision: 'HELP_REVISION',
+    }[topic]!;
+    const configured = (await api.getTelegramContent(locale)).content[contentKey];
+    return ctx.reply(configured ?? translate(locale, `help.${topic}.text` as TranslationKey), {
+      reply_markup: helpKeyboard(locale),
+    });
+  });
+
+  bot.callbackQuery(/^profile-choice:(degree|title):(AUTHOR|PROFILE):([A-Z_]+)$/, async (ctx) => {
+    const user = await loadUser(ctx, api);
+    const locale = user?.locale ?? 'uz-Latn';
+    const draft = user?.activeDraft;
+    await ctx.answerCallbackQuery();
+    if (!draft) return ctx.reply(translate(locale, 'error.stale_action'));
+    const kind = ctx.match[1]!;
+    const prefix = ctx.match[2] as 'AUTHOR' | 'PROFILE';
+    const code = ctx.match[3]!;
+    const expectedState = kind === 'degree' ? `${prefix}_DEGREE` : `${prefix}_ACADEMIC_TITLE`;
+    if (draft.machineState !== expectedState)
+      return ctx.reply(translate(locale, 'error.stale_action'));
+    if (kind === 'degree') {
+      if (!degreeCodes.includes(code as (typeof degreeCodes)[number]))
+        return ctx.reply(translate(locale, 'error.stale_action'));
+      const isOther = code === 'OTHER';
+      const next = isOther
+        ? `${prefix}_DEGREE_CUSTOM`
+        : prefix === 'AUTHOR' || draft.context.profileSection === 'all'
+          ? `${prefix}_ACADEMIC_TITLE`
+          : 'PROFILE_CONFIRM';
+      const updated = await api.updateDraft(
+        String(ctx.from.id),
+        draft,
+        next,
+        isOther ? 'TEXT' : 'CALLBACK',
+        { degreeCode: code, degreeCustom: null },
+      );
+      return continueDraft(ctx, api, locale, updated);
+    }
+    if (!titleCodes.includes(code as (typeof titleCodes)[number]))
+      return ctx.reply(translate(locale, 'error.stale_action'));
+    const isOther = code === 'OTHER';
+    const updated = await api.updateDraft(
+      String(ctx.from.id),
+      draft,
+      isOther
+        ? `${prefix}_TITLE_CUSTOM`
+        : prefix === 'AUTHOR'
+          ? 'AUTHOR_COAUTHORS'
+          : 'PROFILE_CONFIRM',
+      isOther || prefix === 'AUTHOR' ? 'TEXT' : 'CALLBACK',
+      { titleCode: code, titleCustom: null },
+    );
+    return continueDraft(ctx, api, locale, updated);
+  });
+
+  bot.callbackQuery(
+    /^profile:edit:(all|name|phone|email|organization|position|degree|title)$/,
+    async (ctx) => {
+      const user = await loadUser(ctx, api);
+      const locale = user?.locale ?? 'uz-Latn';
+      await ctx.answerCallbackQuery();
+      if (!user?.consentActive) return showConsent(ctx, locale);
+      const section = ctx.match[1] as
+        'all' | 'name' | 'phone' | 'email' | 'organization' | 'position' | 'degree' | 'title';
+      const draft = await api.createProfileDraft(String(ctx.from.id), section);
+      return continueDraft(ctx, api, locale, draft);
+    },
+  );
 
   bot.callbackQuery(/^profile:save:([0-9a-f-]{36}):(\d+)$/, async (ctx) => {
     const user = await loadUser(ctx, api);
@@ -843,80 +1099,7 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
       return ctx.reply(translate(locale, 'error.stale_action'));
     await api.finalizeProfileDraft(String(ctx.from.id), draft);
     await ctx.reply(translate(locale, 'profile.saved'));
-    return showMenu(ctx, locale);
-  });
-
-  bot.callbackQuery('profile:consents', async (ctx) => {
-    const user = await loadUser(ctx, api);
-    const locale = user?.locale ?? 'uz-Latn';
-    await ctx.answerCallbackQuery();
-    const result = await api.listConsents(String(ctx.from.id));
-    if (result.items.length === 0) return ctx.reply(translate(locale, 'consent.history.empty'));
-    return ctx.reply(
-      result.items
-        .map((item) =>
-          translate(locale, 'consent.history.item', {
-            policy_version: item.policyVersion,
-            scope: item.scope,
-            status: translate(
-              locale,
-              item.granted && !item.revokedAt ? 'consent.status.granted' : 'consent.status.revoked',
-            ),
-            date: item.grantedAt.toLocaleDateString(locale),
-          }),
-        )
-        .join('\n'),
-    );
-  });
-
-  bot.callbackQuery('privacy:confirm:ERASURE', async (ctx) => {
-    const user = await loadUser(ctx, api);
-    const locale = user?.locale ?? 'uz-Latn';
-    await ctx.answerCallbackQuery();
-    return ctx.reply(translate(locale, 'privacy.erasure_warning'), {
-      reply_markup: new InlineKeyboard()
-        .text(translate(locale, 'privacy.erasure_confirm'), 'privacy:create:ERASURE')
-        .row()
-        .text(translate(locale, 'common.cancel'), 'privacy:list'),
-    });
-  });
-
-  bot.callbackQuery(/^privacy:create:(ACCESS|ERASURE)$/, async (ctx) => {
-    const user = await loadUser(ctx, api);
-    const locale = user?.locale ?? 'uz-Latn';
-    await ctx.answerCallbackQuery();
-    const item = await api.createPrivacyRequest(
-      String(ctx.from.id),
-      ctx.match[1] as 'ACCESS' | 'ERASURE',
-    );
-    return ctx.reply(
-      translate(locale, item.created ? 'privacy.request.received' : 'privacy.request.existing', {
-        public_id: item.publicId,
-      }),
-    );
-  });
-
-  bot.callbackQuery('privacy:list', async (ctx) => {
-    const user = await loadUser(ctx, api);
-    const locale = user?.locale ?? 'uz-Latn';
-    await ctx.answerCallbackQuery();
-    const result = await api.listPrivacyRequests(String(ctx.from.id));
-    if (result.items.length === 0) return ctx.reply(translate(locale, 'privacy.request.empty'));
-    return ctx.reply(
-      result.items
-        .map((item) =>
-          translate(locale, 'privacy.request.item', {
-            public_id: item.publicId,
-            type: translate(locale, `privacy.type.${item.type.toLowerCase()}` as TranslationKey),
-            status: translate(
-              locale,
-              `privacy.status.${item.status.toLowerCase()}` as TranslationKey,
-            ),
-            due_at: item.dueAt.toLocaleDateString(locale),
-          }),
-        )
-        .join('\n'),
-    );
+    return showMenu(ctx, locale, api);
   });
 
   bot.callbackQuery(/^journal:([0-9a-f-]{36})$/, async (ctx) => {
@@ -930,12 +1113,42 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
       `<b>${escapeTelegramHtml(journal.name)}</b>\n\n${escapeTelegramHtml(journal.description)}`,
       {
         parse_mode: 'HTML',
-        reply_markup: new InlineKeyboard().text(
-          translate(locale, 'journal.submit_here'),
-          `choose:${journal.id}`,
-        ),
+        reply_markup: new InlineKeyboard()
+          .text(translate(locale, 'journal.requirements'), `requirements:${journal.id}`)
+          .row()
+          .text(translate(locale, 'menu.contact'), `contact:journal:${journal.id}`)
+          .row()
+          .text(translate(locale, 'journal.submit_here'), `choose:${journal.id}`),
       },
     );
+  });
+
+  bot.callbackQuery(/^requirements:([0-9a-f-]{36})$/, async (ctx) => {
+    const user = await loadUser(ctx, api);
+    const locale = user?.locale ?? 'uz-Latn';
+    const journals = await api.listJournals(locale);
+    const journal = journals.find((item) => item.id === ctx.match[1]);
+    await ctx.answerCallbackQuery();
+    if (!journal?.requirements) return ctx.reply(translate(locale, 'requirements.unavailable'));
+    const requirement = journal.requirements;
+    return ctx.reply(
+      `${translate(locale, 'requirements.version', { version: String(requirement.version) })}\n\n${requirement.title}\n\n${requirement.body || requirement.summary}`,
+      {
+        reply_markup: new InlineKeyboard()
+          .text(translate(locale, 'journal.submit_here'), `choose:${journal.id}`)
+          .row()
+          .text(translate(locale, 'menu.contact'), `contact:journal:${journal.id}`)
+          .row()
+          .text(translate(locale, 'common.home'), 'menu:home'),
+      },
+    );
+  });
+
+  bot.callbackQuery(/^contact:journal:([0-9a-f-]{36})$/, async (ctx) => {
+    const user = await loadUser(ctx, api);
+    const locale = user?.locale ?? 'uz-Latn';
+    await ctx.answerCallbackQuery();
+    return showContact(ctx, api, locale, ctx.match[1]);
   });
 
   bot.callbackQuery(/^choose:([0-9a-f-]{36})$/, async (ctx) => {
@@ -958,7 +1171,7 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
     const updated = await api.updateDraft(
       String(ctx.from.id),
       draft,
-      hasProfile ? 'PROFILE_SNAPSHOT' : 'AUTHOR_LAST_NAME',
+      hasProfile ? 'PROFILE_SNAPSHOT' : 'AUTHOR_FULL_NAME',
       hasProfile ? 'CALLBACK' : 'TEXT',
       {
         requirementsAcknowledgedAt: new Date().toISOString(),
@@ -979,7 +1192,7 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
     const updated = await api.updateDraft(
       String(ctx.from.id),
       draft,
-      edit ? 'AUTHOR_LAST_NAME' : 'AUTHOR_COAUTHORS',
+      edit ? 'AUTHOR_FULL_NAME' : 'AUTHOR_COAUTHORS',
       'TEXT',
     );
     return continueDraft(ctx, api, locale, updated);
@@ -991,7 +1204,25 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
     await ctx.answerCallbackQuery();
     if (user?.activeDraft) await api.cancelDraft(String(ctx.from.id), user.activeDraft.id);
     await ctx.reply(translate(locale, 'submission.draft_cancelled'));
-    return showMenu(ctx, locale);
+    return showMenu(ctx, locale, api);
+  });
+
+  bot.callbackQuery(/^draft:back:([0-9a-f-]{36}):(\d+)$/, async (ctx) => {
+    const user = await loadUser(ctx, api);
+    const locale = user?.locale ?? 'uz-Latn';
+    const draft = user?.activeDraft;
+    await ctx.answerCallbackQuery();
+    if (!draft || draft.id !== ctx.match[1] || draft.rowVersion !== Number(ctx.match[2]))
+      return ctx.reply(translate(locale, 'error.stale_action'));
+    const previous = previousDraftStep(draft);
+    if (!previous) return showMenu(ctx, locale, api);
+    const updated = await api.updateDraft(
+      String(ctx.from.id),
+      draft,
+      previous.machineState,
+      previous.expectedInputType,
+    );
+    return continueDraft(ctx, api, locale, updated);
   });
 
   bot.callbackQuery(/^draft:replace:(\d{1,2}):([0-9a-f-]{36}):(\d+)$/, async (ctx) => {
@@ -1016,7 +1247,7 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
   bot.callbackQuery('draft:refresh', async (ctx) => {
     const user = await loadUser(ctx, api);
     await ctx.answerCallbackQuery();
-    if (!user?.activeDraft) return showMenu(ctx, user?.locale ?? 'uz-Latn');
+    if (!user?.activeDraft) return showMenu(ctx, user?.locale ?? 'uz-Latn', api);
     return continueDraft(ctx, api, user.locale ?? 'uz-Latn', user.activeDraft);
   });
 
@@ -1037,7 +1268,7 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
         ),
       },
     );
-    return showMenu(ctx, locale);
+    return showMenu(ctx, locale, api);
   });
 
   bot.callbackQuery(/^revision:([0-9a-f-]{36})$/, async (ctx) => {
@@ -1172,13 +1403,14 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
       return ctx.reply(translate(locale, 'start.choose_language'), {
         reply_markup: languageKeyboard(),
       });
+    if (text === translate(locale, 'common.home')) return showMenu(ctx, locale, api);
     if (text === translate(locale, 'menu.journals')) return showJournals(ctx, api, locale);
+    if (text === translate(locale, 'journal.requirements'))
+      return showJournals(ctx, api, locale, false, true);
     if (text === translate(locale, 'menu.submit_article'))
       return showJournals(ctx, api, locale, true);
-    if (text === translate(locale, 'menu.help'))
-      return ctx.reply(translate(locale, 'help.summary'));
-    if (text === translate(locale, 'menu.contact'))
-      return ctx.reply(translate(locale, 'contact.summary'));
+    if (text === translate(locale, 'menu.help')) return showHelp(ctx, locale);
+    if (text === translate(locale, 'menu.contact')) return showContact(ctx, api, locale);
     if (text === translate(locale, 'menu.my_articles')) {
       return showSubmissions(ctx, api, locale, String(ctx.from.id));
     }
@@ -1188,14 +1420,27 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
     if (text === translate(locale, 'menu.profile')) {
       return showProfile(ctx, user, locale);
     }
+    if (text === translate(locale, 'common.back')) {
+      const draft = user.activeDraft;
+      if (!draft) return showMenu(ctx, locale, api);
+      const previous = previousDraftStep(draft);
+      if (!previous) return showMenu(ctx, locale, api);
+      const updated = await api.updateDraft(
+        String(ctx.from.id),
+        draft,
+        previous.machineState,
+        previous.expectedInputType,
+      );
+      return continueDraft(ctx, api, locale, updated);
+    }
     if (text === translate(locale, 'common.cancel')) {
       if (user.activeDraft) await api.cancelDraft(String(ctx.from.id), user.activeDraft.id);
       await ctx.reply(translate(locale, 'submission.draft_cancelled'));
-      return showMenu(ctx, locale);
+      return showMenu(ctx, locale, api);
     }
     if (text === translate(locale, 'common.save_draft')) {
       await ctx.reply(translate(locale, 'submission.draft_saved'));
-      return showMenu(ctx, locale);
+      return showMenu(ctx, locale, api);
     }
     const draft = user.activeDraft;
     if (draft?.machineState === 'FILE_ARTICLE' && text === translate(locale, 'common.skip')) {
@@ -1222,21 +1467,24 @@ export function createBot(token: string, api: BotApi, apiRoot?: string): Bot {
       return continueDraft(ctx, api, locale, previewDraft);
     }
     const profileField = draft && profileTextFields[draft.machineState];
+    const nextProfile = draft && profileField ? nextProfileState(draft) : null;
     const step =
       draft && profileField
         ? {
             field: profileField,
-            next: nextProfileState(draft),
-            expected: nextProfileState(draft) === 'PROFILE_CONFIRM' ? 'CALLBACK' : 'TEXT',
+            next: nextProfile!,
+            expected: ['PROFILE_CONFIRM', 'PROFILE_DEGREE', 'PROFILE_ACADEMIC_TITLE'].includes(
+              nextProfile!,
+            )
+              ? 'CALLBACK'
+              : 'TEXT',
           }
         : draft && textSteps[draft.machineState];
-    if (!draft || !step) return showMenu(ctx, locale);
+    if (!draft || !step) return showMenu(ctx, locale, api);
     if (step.field === 'email' && !emailPattern.test(text))
       return ctx.reply(translate(locale, 'validation.email'));
     if (step.field === 'phone' && !phonePattern.test(text))
       return ctx.reply(translate(locale, 'validation.phone'));
-    if (step.field === 'orcid' && text !== '-' && !orcidSchema.safeParse(text).success)
-      return ctx.reply(translate(locale, 'validation.orcid'));
     if (text.length > 10_000)
       return ctx.reply(translate(locale, 'validation.required', { field: step.field }));
     if (step.field === 'abstract') {

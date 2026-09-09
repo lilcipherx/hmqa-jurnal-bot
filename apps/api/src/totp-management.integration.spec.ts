@@ -43,16 +43,10 @@ suite('staff TOTP and password management', () => {
       update: {},
       create: { code: 'ADMIN', description: 'Integration administrator' },
     });
-    const editorRole = await database!.role.upsert({
-      where: { code: 'EDITOR' },
-      update: {},
-      create: { code: 'EDITOR', description: 'Integration editor' },
-    });
-
     for (const [name, roleId] of [
       ['admin', adminRole.id],
-      ['editor', editorRole.id],
-      ['target', editorRole.id],
+      ['non-admin', null],
+      ['target', adminRole.id],
       ['self-reset', adminRole.id],
       ['password-change', adminRole.id],
     ] as const) {
@@ -66,7 +60,7 @@ suite('staff TOTP and password management', () => {
           status: 'ACTIVE',
           totpEnabled: true,
           totpSecretCipher: encryptSecret(secret, encryptionKey),
-          roles: { create: { roleId } },
+          ...(roleId ? { roles: { create: { roleId } } } : {}),
         },
       });
       const token = generateOpaqueToken();
@@ -163,13 +157,13 @@ suite('staff TOTP and password management', () => {
   });
 
   it('forbids a non-admin from resetting another staff account', async () => {
-    const editor = identities.get('editor')!;
+    const nonAdmin = identities.get('non-admin')!;
     const target = identities.get('target')!;
     const response = await app.inject({
       method: 'POST',
       url: `/api/v1/admin/employees/${target.employeeId}/totp/reset`,
-      headers: staffHeaders(editor),
-      payload: stepUpPayload(editor),
+      headers: staffHeaders(nonAdmin),
+      payload: stepUpPayload(nonAdmin),
     });
     expect(response.statusCode).toBe(403);
     expect(response.json()).toMatchObject({ code: 'FORBIDDEN' });

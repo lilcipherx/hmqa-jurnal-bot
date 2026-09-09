@@ -156,15 +156,7 @@ async function webGet(session, path, locale = 'en', { allowTranslationKeys = fal
   return html;
 }
 
-const sessions = {
-  operator: await login('operator@example.invalid'),
-  editor: await login('editor@example.invalid'),
-  reviewer: await login('reviewer@example.invalid'),
-  chief: await login('chief-editor@example.invalid'),
-  content: await login('content-admin@example.invalid'),
-  admin: await login(process.env.SEED_ADMIN_EMAIL ?? 'admin-test@example.invalid'),
-  auditor: await login('auditor@example.invalid'),
-};
+const administrator = await login(process.env.SEED_ADMIN_EMAIL ?? 'admin-test@example.invalid');
 
 const traceId = '30bf1a89-14c1-43ea-a41c-7b7a52ff2210';
 const traced = await expectStatus(
@@ -208,23 +200,24 @@ if (!openapi.components?.securitySchemes?.staffCookie)
   throw new Error('OpenAPI document is missing the staff authentication scheme');
 
 await Promise.all([
-  apiGet(sessions.editor, '/api/v1/admin/dashboard'),
-  apiGet(sessions.editor, '/api/v1/admin/submissions?status=PUBLISHED&search=LIFECYCLE'),
-  apiGet(sessions.editor, '/api/v1/admin/journals'),
-  apiGet(sessions.editor, '/api/v1/admin/reviewers'),
-  apiGet(sessions.reviewer, '/api/v1/admin/reviews/assigned'),
-  apiGet(sessions.content, '/api/v1/admin/translations'),
-  apiGet(sessions.admin, '/api/v1/admin/employees'),
-  apiGet(sessions.admin, '/api/v1/admin/roles'),
-  apiGet(sessions.admin, '/api/v1/admin/settings/runtime'),
-  apiGet(sessions.admin, '/api/v1/admin/notifications'),
-  apiGet(sessions.admin, '/api/v1/admin/privacy/requests'),
-  apiGet(sessions.auditor, '/api/v1/admin/audit'),
-  apiGet(sessions.auditor, '/api/v1/admin/reports/overview'),
-  apiGet(sessions.auditor, '/api/v1/admin/privacy/legal-holds'),
+  apiGet(administrator, '/api/v1/admin/dashboard'),
+  apiGet(administrator, '/api/v1/admin/submissions?status=PUBLISHED&search=LIFECYCLE'),
+  apiGet(administrator, '/api/v1/admin/journals'),
+  apiGet(administrator, '/api/v1/admin/reviewers'),
+  apiGet(administrator, '/api/v1/admin/reviews/assigned'),
+  apiGet(administrator, '/api/v1/admin/telegram-content'),
+  apiGet(administrator, '/api/v1/admin/employees'),
+  apiGet(administrator, '/api/v1/admin/roles'),
+  apiGet(administrator, '/api/v1/admin/settings/runtime'),
+  apiGet(administrator, '/api/v1/admin/notifications'),
+  // Audit/privacy remain protected backend controls even though normal navigation hides them.
+  apiGet(administrator, '/api/v1/admin/privacy/requests'),
+  apiGet(administrator, '/api/v1/admin/audit'),
+  apiGet(administrator, '/api/v1/admin/reports/overview'),
+  apiGet(administrator, '/api/v1/admin/privacy/legal-holds'),
 ]);
 
-const submissions = await (await apiGet(sessions.chief, '/api/v1/admin/submissions')).json();
+const submissions = await (await apiGet(administrator, '/api/v1/admin/submissions')).json();
 if (!Array.isArray(submissions.items) || submissions.items.length === 0)
   throw new Error('Admin runtime probe requires at least one acceptance submission');
 const selectedSubmission = submissions.items.find((item) =>
@@ -233,43 +226,40 @@ const selectedSubmission = submissions.items.find((item) =>
 if (!selectedSubmission) throw new Error('Published lifecycle acceptance fixture is unavailable');
 const submissionId = selectedSubmission.id;
 await Promise.all([
-  apiGet(sessions.chief, `/api/v1/admin/submissions/${submissionId}`),
-  apiGet(sessions.chief, `/api/v1/admin/submissions/${submissionId}/assignment-options`),
+  apiGet(administrator, `/api/v1/admin/submissions/${submissionId}`),
+  apiGet(administrator, `/api/v1/admin/submissions/${submissionId}/assignment-options`),
 ]);
 
 await Promise.all([
-  webGet(sessions.editor, '/dashboard', 'uz-Latn'),
-  webGet(sessions.editor, '/submissions', 'ru'),
-  webGet(sessions.chief, `/submissions/${submissionId}`, 'en'),
-  webGet(sessions.content, '/journals', 'uz-Latn'),
-  webGet(sessions.editor, '/reviewers', 'ru'),
-  webGet(sessions.reviewer, '/reviews', 'en'),
-  webGet(sessions.content, '/translations', 'uz-Latn', { allowTranslationKeys: true }),
-  webGet(sessions.admin, '/users', 'ru'),
-  // Audit action identifiers are stable domain codes and may intentionally equal i18n keys.
-  webGet(sessions.auditor, '/audit', 'en', { allowTranslationKeys: true }),
-  webGet(sessions.auditor, '/reports', 'uz-Latn'),
-  webGet(sessions.admin, '/settings', 'ru'),
-  webGet(sessions.admin, '/notifications', 'en'),
-  webGet(sessions.admin, '/privacy', 'uz-Latn'),
+  webGet(administrator, '/dashboard', 'uz-Latn'),
+  webGet(administrator, '/submissions', 'ru'),
+  webGet(administrator, `/submissions/${submissionId}`, 'en'),
+  webGet(administrator, '/journals', 'uz-Latn'),
+  webGet(administrator, '/reviewers', 'ru'),
+  webGet(administrator, '/telegram', 'en'),
+  webGet(administrator, '/users', 'ru'),
+  webGet(administrator, '/settings', 'uz-Latn'),
+  webGet(administrator, '/notifications', 'en'),
 ]);
 
 await expectStatus(
   globalThis.fetch(`${apiBase}/api/v1/auth/logout`, {
     method: 'POST',
     headers: {
-      cookie: sessions.admin.cookie,
+      cookie: administrator.cookie,
       origin: 'http://admin-web:3000',
-      'x-csrf-token': sessions.admin.csrf,
+      'x-csrf-token': administrator.csrf,
     },
   }),
   204,
   'logout',
 );
 await expectStatus(
-  globalThis.fetch(`${apiBase}/api/v1/auth/me`, { headers: { cookie: sessions.admin.cookie } }),
+  globalThis.fetch(`${apiBase}/api/v1/auth/me`, { headers: { cookie: administrator.cookie } }),
   401,
   'revoked session',
 );
 
-process.stdout.write('admin runtime probe: authentication, 2FA, API and rendered pages passed\n');
+process.stdout.write(
+  'admin runtime probe: single-role authentication, API, eight-section UI and logout passed\n',
+);

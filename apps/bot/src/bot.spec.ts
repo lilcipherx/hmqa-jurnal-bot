@@ -1,6 +1,6 @@
 import type { Update } from 'grammy/types';
 import { describe, expect, it, vi } from 'vitest';
-import { botCommands, createBot, resolveUserLocale, type BotApi } from './bot.js';
+import { botCommands, createBot, mainMenu, resolveUserLocale, type BotApi } from './bot.js';
 
 function update(updateId: number, text: string): Update {
   return {
@@ -61,19 +61,25 @@ describe('Telegram conversation', () => {
       'start',
       'help',
       'journals',
+      'requirements',
       'submit',
       'drafts',
+      'articles',
       'status',
       'profile',
       'language',
       'cancel',
-      'privacy',
     ];
     for (const locale of ['uz-Latn', 'ru', 'en'] as const) {
       const commands = botCommands(locale);
       expect(commands.map(({ command }) => command)).toEqual(expected);
       expect(commands.every(({ description }) => description.length > 0)).toBe(true);
     }
+    const menu = JSON.stringify(mainMenu('ru'));
+    expect(menu).toContain('☎️ Связаться');
+    expect(menu).toContain('📋 Требования');
+    expect(menu).not.toContain('Запросить мои данные');
+    expect(menu).not.toContain('Запросить удаление данных');
   });
 
   it('prefers the persisted locale for error responses', () => {
@@ -249,7 +255,7 @@ describe('Telegram conversation', () => {
     expect(completeUpdate).toHaveBeenCalledWith(1, 'PROCESSED');
   });
 
-  it('routes status and privacy commands through consented API-backed flows', async () => {
+  it('routes status through the consented API flow without exposing privacy commands', async () => {
     const listSubmissions = vi.fn().mockResolvedValue({ items: [] });
     const user = {
       id: '4ef0649f-c2de-48ab-a8a7-f3bea4de9e04',
@@ -289,7 +295,6 @@ describe('Telegram conversation', () => {
     outgoing.length = 0;
 
     await bot.handleUpdate(update(20, '/status'));
-    await bot.handleUpdate(update(21, '/privacy'));
 
     expect(listSubmissions).toHaveBeenCalledWith('200');
     const payloads = outgoing
@@ -298,7 +303,7 @@ describe('Telegram conversation', () => {
     expect(payloads.some((payload) => payload.includes('У вас пока нет поданных статей'))).toBe(
       true,
     );
-    expect(payloads.some((payload) => payload.includes('Персональные данные'))).toBe(true);
+    expect(payloads.every((payload) => !payload.includes('Запросить мои данные'))).toBe(true);
   });
 
   it('does not process an update that was already claimed', async () => {
@@ -561,13 +566,13 @@ describe('Telegram conversation', () => {
     expect(JSON.stringify(outgoing)).toContain('https://storage.example.invalid/receipt.pdf');
   });
 
-  it('rejects an invalid ORCID before persisting the durable wizard state', async () => {
-    const draft = {
+  it('persists normalized degree and title selections, including a custom value', async () => {
+    let draft = {
       id: '83a7a9e3-b6af-4a37-a873-d83dc3f09ccc',
       journalId: '43c0f310-e5ad-4565-b69d-bada3fd88512',
       requirementVersionId: '58be2910-4ed7-411e-be5a-d6c2fdb31dc1',
-      machineState: 'AUTHOR_ORCID',
-      expectedInputType: 'TEXT',
+      machineState: 'AUTHOR_DEGREE',
+      expectedInputType: 'CALLBACK',
       context: {},
       rowVersion: 7,
       expiresAt: new Date('2027-01-01'),
@@ -576,12 +581,26 @@ describe('Telegram conversation', () => {
       requirementVersion: null,
       journal: null,
     };
-    const updateDraft = vi.fn().mockResolvedValue({
-      ...draft,
-      machineState: 'AUTHOR_COAUTHORS',
-      rowVersion: 8,
-      context: { orcid: '0000-0002-1825-0097' },
-    });
+    const updateDraft = vi
+      .fn()
+      .mockImplementation(
+        (
+          _telegramUserId: string,
+          current: typeof draft,
+          machineState: string,
+          expectedInputType: string,
+          contextPatch: Record<string, unknown> = {},
+        ) => {
+          draft = {
+            ...current,
+            machineState,
+            expectedInputType,
+            rowVersion: current.rowVersion + 1,
+            context: { ...current.context, ...contextPatch },
+          };
+          return Promise.resolve(draft);
+        },
+      );
     const api = {
       claimUpdate: vi.fn().mockResolvedValue({
         claimed: true,
@@ -589,14 +608,16 @@ describe('Telegram conversation', () => {
       }),
       completeUpdate: vi.fn().mockResolvedValue(undefined),
       releaseUpdate: vi.fn().mockResolvedValue(undefined),
-      syncUser: vi.fn().mockResolvedValue({
-        id: '4ef0649f-c2de-48ab-a8a7-f3bea4de9e04',
-        locale: 'ru',
-        status: 'ACTIVE',
-        consentActive: true,
-        activeDraft: draft,
-        profile: null,
-      }),
+      syncUser: vi.fn().mockImplementation(() =>
+        Promise.resolve({
+          id: '4ef0649f-c2de-48ab-a8a7-f3bea4de9e04',
+          locale: 'ru',
+          status: 'ACTIVE',
+          consentActive: true,
+          activeDraft: draft,
+          profile: null,
+        }),
+      ),
       updateDraft,
     } as unknown as BotApi;
     const bot = createBot('123456:ABC-telegram-test-token', api);
@@ -618,14 +639,152 @@ describe('Telegram conversation', () => {
     await bot.init();
     outgoing.length = 0;
 
-    await bot.handleUpdate(update(7, '0000-0002-1825-0098'));
-    expect(updateDraft).not.toHaveBeenCalled();
-    expect(JSON.stringify(outgoing)).toContain('Неверный ORCID');
+    await bot.handleUpdate(callbackUpdate(7, 'profile-choice:degree:AUTHOR:PHD'));
+    expect(updateDraft).toHaveBeenLastCalledWith(
+      '200',
+      expect.objectContaining({ machineState: 'AUTHOR_DEGREE' }),
+      'AUTHOR_ACADEMIC_TITLE',
+      'CALLBACK',
+      { degreeCode: 'PHD', degreeCustom: null },
+    );
+    expect(JSON.stringify(outgoing)).toContain('Выберите учёное звание');
 
     outgoing.length = 0;
-    await bot.handleUpdate(update(8, '0000-0002-1825-0097'));
-    expect(updateDraft).toHaveBeenCalledWith('200', draft, 'AUTHOR_COAUTHORS', 'TEXT', {
-      orcid: '0000-0002-1825-0097',
+    await bot.handleUpdate(update(8, '⬅️ Назад'));
+    expect(updateDraft).toHaveBeenLastCalledWith(
+      '200',
+      expect.objectContaining({ machineState: 'AUTHOR_ACADEMIC_TITLE' }),
+      'AUTHOR_DEGREE',
+      'CALLBACK',
+    );
+    expect(draft.context).toMatchObject({ degreeCode: 'PHD' });
+
+    await bot.handleUpdate(callbackUpdate(9, 'profile-choice:degree:AUTHOR:PHD'));
+    outgoing.length = 0;
+    await bot.handleUpdate(callbackUpdate(10, 'profile-choice:title:AUTHOR:OTHER'));
+    expect(updateDraft).toHaveBeenLastCalledWith(
+      '200',
+      expect.objectContaining({ machineState: 'AUTHOR_ACADEMIC_TITLE' }),
+      'AUTHOR_TITLE_CUSTOM',
+      'TEXT',
+      { titleCode: 'OTHER', titleCustom: null },
+    );
+
+    outgoing.length = 0;
+    await bot.handleUpdate(update(11, 'International research fellow'));
+    expect(updateDraft).toHaveBeenLastCalledWith(
+      '200',
+      expect.objectContaining({ machineState: 'AUTHOR_TITLE_CUSTOM' }),
+      'AUTHOR_COAUTHORS',
+      'TEXT',
+      { titleCustom: 'International research fellow' },
+    );
+    expect(draft.context).toMatchObject({
+      degreeCode: 'PHD',
+      titleCode: 'OTHER',
+      titleCustom: 'International research fellow',
     });
+  });
+
+  it('shows meaningful help and current configured contact data', async () => {
+    const journalId = '43c0f310-e5ad-4565-b69d-bada3fd88512';
+    const getTelegramContent = vi.fn().mockResolvedValue({
+      contact: {
+        phone: '+998 71 000 00 00',
+        email: 'editorial@example.invalid',
+        telegram: '@hmqa_support_test',
+        address: 'Test address',
+        workingHours: 'Mon–Fri 09:00–18:00',
+        note: 'UAT contact only',
+      },
+      content: { HELP_SUBMIT: 'Configured: choose a journal and upload the required files.' },
+    });
+    const api = {
+      claimUpdate: vi.fn().mockResolvedValue({
+        claimed: true,
+        correlationId: '64d4ef2c-418a-4d9c-a519-33c0abca8d9b',
+      }),
+      completeUpdate: vi.fn().mockResolvedValue(undefined),
+      releaseUpdate: vi.fn().mockResolvedValue(undefined),
+      syncUser: vi.fn().mockResolvedValue({
+        id: '4ef0649f-c2de-48ab-a8a7-f3bea4de9e04',
+        locale: 'ru',
+        status: 'ACTIVE',
+        consentActive: true,
+        activeDraft: null,
+        profile: null,
+      }),
+      getTelegramContent,
+      listJournals: vi.fn().mockResolvedValue([
+        {
+          id: journalId,
+          code: 'UAT',
+          mode: 'NATIVE',
+          name: 'Тестовый журнал',
+          description: 'Описание журнала',
+          requirements: {
+            id: '58be2910-4ed7-411e-be5a-d6c2fdb31dc1',
+            version: 3,
+            effectiveAt: new Date(),
+            state: 'PUBLISHED',
+            title: 'Требования UAT',
+            summary: 'Краткие требования',
+            body: 'Полный текст опубликованных требований.',
+            help: null,
+          },
+        },
+      ]),
+    } as unknown as BotApi;
+    const bot = createBot('123456:ABC-telegram-test-token', api);
+    const outgoing: { method: string; payload: unknown }[] = [];
+    bot.api.config.use((_previous, method, payload) => {
+      outgoing.push({ method, payload });
+      return Promise.resolve(
+        method === 'getMe'
+          ? {
+              ok: true,
+              result: { id: 123456, is_bot: true, first_name: 'HMQA', username: 'hmqa_test_bot' },
+            }
+          : method === 'answerCallbackQuery'
+            ? { ok: true, result: true }
+            : {
+                ok: true,
+                result: { message_id: 1, date: 1_700_000_000, chat: { id: 100, type: 'private' } },
+              },
+      ) as never;
+    });
+    await bot.init();
+    outgoing.length = 0;
+
+    await bot.handleUpdate(update(10, '/help'));
+    expect(JSON.stringify(outgoing)).toContain('Как подать статью');
+    expect(JSON.stringify(outgoing)).toContain('Требования к файлам');
+
+    outgoing.length = 0;
+    await bot.handleUpdate(callbackUpdate(11, 'help:submit'));
+    expect(JSON.stringify(outgoing)).toContain('Configured: choose a journal');
+
+    outgoing.length = 0;
+    await bot.handleUpdate(update(12, '☎️ Связаться'));
+    const contactPayload = JSON.stringify(outgoing);
+    expect(contactPayload).toContain('+998 71 000 00 00');
+    expect(contactPayload).toContain('editorial@example.invalid');
+    expect(contactPayload).toContain('@hmqa_support_test');
+    expect(contactPayload).not.toContain('доступны в карточке журнала');
+
+    outgoing.length = 0;
+    await bot.handleUpdate(update(13, '📋 Требования'));
+    expect(JSON.stringify(outgoing)).toContain(`requirements:${journalId}`);
+
+    outgoing.length = 0;
+    await bot.handleUpdate(callbackUpdate(14, `requirements:${journalId}`));
+    const requirementPayload = JSON.stringify(outgoing);
+    expect(requirementPayload).toContain('Требования · версия 3');
+    expect(requirementPayload).toContain('Полный текст опубликованных требований.');
+
+    outgoing.length = 0;
+    await bot.handleUpdate(callbackUpdate(15, `contact:journal:${journalId}`));
+    expect(getTelegramContent).toHaveBeenLastCalledWith('ru', journalId);
+    expect(JSON.stringify(outgoing)).toContain('+998 71 000 00 00');
   });
 });

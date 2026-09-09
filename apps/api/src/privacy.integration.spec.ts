@@ -130,18 +130,15 @@ suite('data-subject request and legal-hold integration', () => {
         machineState: 'PROFILE_CONFIRM',
         expectedInputType: 'CALLBACK',
         contextPatch: {
-          firstName: 'Privacy',
-          lastName: 'Author',
-          middleName: '-',
+          fullName: 'Privacy Author',
           phone: '+999000000001',
           email: 'privacy.author@example.invalid',
           organization: 'Example Academy',
           position: 'Researcher',
-          degree: 'PhD',
-          academicTitle: '-',
-          country: 'Uzbekistan',
-          city: 'Tashkent',
-          orcid: '0000-0002-1825-0097',
+          degreeCode: 'PHD',
+          degreeCustom: null,
+          titleCode: 'NONE',
+          titleCustom: null,
         },
       },
     });
@@ -155,11 +152,41 @@ suite('data-subject request and legal-hold integration', () => {
     expect(submitted.statusCode).toBe(200);
     const profile = await database!.authorProfile.findUniqueOrThrow({ where: { userId } });
     expect(profile).toMatchObject({
-      firstName: 'Privacy',
+      fullName: 'Privacy Author',
       middleName: null,
-      degree: 'PhD',
-      orcid: '0000-0002-1825-0097',
+      degreeCode: 'PHD',
+      titleCode: 'NONE',
+      country: null,
+      city: null,
+      orcid: null,
     });
+    for (const [section, machineState] of [
+      ['degree', 'PROFILE_DEGREE'],
+      ['title', 'PROFILE_ACADEMIC_TITLE'],
+    ] as const) {
+      const selectorDraftResponse = await app.inject({
+        method: 'POST',
+        url: `/api/v1/internal/telegram/users/${telegramUserId}/profile-draft`,
+        headers: serviceHeaders(),
+        payload: { section },
+      });
+      expect(selectorDraftResponse.statusCode, selectorDraftResponse.body).toBe(201);
+      const selectorDraft = selectorDraftResponse.json<{
+        id: string;
+        machineState: string;
+        expectedInputType: string;
+      }>();
+      expect(selectorDraft).toMatchObject({ machineState, expectedInputType: 'CALLBACK' });
+      expect(
+        (
+          await app.inject({
+            method: 'DELETE',
+            url: `/api/v1/internal/telegram/users/${telegramUserId}/drafts/${selectorDraft.id}`,
+            headers: serviceHeaders(),
+          })
+        ).statusCode,
+      ).toBe(204);
+    }
     const synced = await app.inject({
       method: 'POST',
       url: '/api/v1/internal/telegram/users/sync',

@@ -15,6 +15,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:upgrade-test": "node prisma/verify-product-model-migration.mjs",
     "bootstrap:admin": "node dist/prisma/bootstrap-admin.js",
     "prisma:seed": "node dist/prisma/seed.js"
   },

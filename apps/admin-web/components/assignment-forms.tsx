@@ -11,13 +11,12 @@ function text(form: FormData, name: string): string {
 interface StaffOption {
   id: string;
   displayName: string;
-  roles: string[];
 }
 
 interface ReviewerOption {
   id: string;
+  displayName: string;
   affiliation: string;
-  employee: { displayName: string };
 }
 
 export function AssignmentForms({
@@ -27,7 +26,6 @@ export function AssignmentForms({
   files,
   canAssignStaff,
   canAssignReviewers,
-  roleLabels,
   labels,
 }: {
   submissionId: string;
@@ -36,7 +34,6 @@ export function AssignmentForms({
   files: { id: string; originalName: string }[];
   canAssignStaff: boolean;
   canAssignReviewers: boolean;
-  roleLabels: Record<string, string>;
   labels: Record<string, string>;
 }) {
   const [message, setMessage] = useState('');
@@ -53,7 +50,6 @@ export function AssignmentForms({
       kind === 'staff'
         ? {
             employeeId: form.get('employeeId'),
-            kind: form.get('kind'),
             reason: form.get('reason'),
             deadline: text(form, 'staffDeadline')
               ? new Date(text(form, 'staffDeadline')).toISOString()
@@ -119,19 +115,11 @@ export function AssignmentForms({
         >
           <h2>{labels.staffHeading}</h2>
           <label className="field">
-            {labels.kind}
-            <select name="kind" required>
-              <option value="OPERATOR">{labels.operator}</option>
-              <option value="EDITOR">{labels.editor}</option>
-            </select>
-          </label>
-          <label className="field">
             {labels.employee}
             <select name="employeeId" required>
               {employees.map((employee) => (
                 <option value={employee.id} key={employee.id}>
-                  {employee.displayName} ·{' '}
-                  {employee.roles.map((role) => roleLabels[role] ?? role).join(', ')}
+                  {employee.displayName}
                 </option>
               ))}
             </select>
@@ -186,7 +174,7 @@ export function AssignmentForms({
               <select name="reviewerId" required>
                 {reviewers.map((reviewer) => (
                   <option value={reviewer.id} key={reviewer.id}>
-                    {reviewer.employee.displayName} · {reviewer.affiliation}
+                    {reviewer.displayName} · {reviewer.affiliation}
                   </option>
                 ))}
               </select>

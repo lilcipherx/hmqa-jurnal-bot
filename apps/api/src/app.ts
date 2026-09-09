@@ -13,8 +13,10 @@ import swaggerUi from '@fastify/swagger-ui';
 import { GetObjectCommand, HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
+  academicTitleCodes,
+  authorProfileSchema,
   journalRequirementConfigSchema,
-  orcidSchema,
+  scientificDegreeCodes,
   transitionRequestSchema,
 } from '@hmqa/contracts';
 import type { AppConfig } from '@hmqa/config';
@@ -27,7 +29,6 @@ import {
   hasJournalScope,
   permissionsFor,
   submissionStatuses,
-  type Role,
   type ScopedActor,
 } from '@hmqa/domain';
 import { normalizeLocale, placeholders, translate, type Locale } from '@hmqa/i18n';
@@ -83,6 +84,45 @@ const staffStepUpSchema = z
 
 const totpEnrollmentTtlMs = 10 * 60_000;
 
+const botContentKeys = [
+  'WELCOME_SUPPORT',
+  'HELP_SUBMIT',
+  'HELP_FILES',
+  'HELP_STATUSES',
+  'HELP_REVISION',
+  'HELP_CONTACT',
+] as const;
+
+const contactInputSchema = z
+  .object({
+    journalId: z.uuid().nullable(),
+    phone: z
+      .string()
+      .trim()
+      .regex(/^\+?[0-9 ()-]{7,32}$/)
+      .nullable(),
+    email: z.email().nullable(),
+    telegram: z
+      .string()
+      .trim()
+      .regex(/^@?[A-Za-z0-9_]{5,64}$/)
+      .nullable(),
+    localizations: z
+      .array(
+        z
+          .object({
+            locale: z.enum(['uz-Latn', 'ru', 'en']),
+            address: z.string().trim().max(2_000).nullable(),
+            workingHours: z.string().trim().max(1_000).nullable(),
+            note: z.string().trim().max(4_000).nullable(),
+          })
+          .strict(),
+      )
+      .length(3)
+      .refine((items) => new Set(items.map(({ locale }) => locale)).size === 3),
+  })
+  .strict();
+
 const submissionResultSchema = z.object({
   submissionId: z.uuid(),
   publicId: z.string(),
@@ -121,17 +161,6 @@ class BusinessRuleError extends Error {
     super(code);
   }
 }
-
-const rolePriority: readonly Role[] = [
-  'CHIEF_EDITOR',
-  'EDITOR',
-  'OPERATOR',
-  'REVIEWER',
-  'CONTENT_ADMIN',
-  'ADMIN',
-  'AUDITOR',
-  'AUTHOR',
-];
 
 interface AppDependencies {
   readonly config: AppConfig;
@@ -278,7 +307,7 @@ export async function createApp({
       where: { tokenHash: hashOpaqueToken(token) },
       include: {
         employee: {
-          include: { roles: { include: { role: true } }, journalScopes: true },
+          include: { roles: { include: { role: true } } },
         },
       },
     });
@@ -297,22 +326,18 @@ export async function createApp({
         correlationId: request.id,
       });
     }
-    const roleCodes = session.employee.roles
-      .filter((membership) => !membership.expiresAt || membership.expiresAt > now)
-      .map((membership) => membership.role.code as Role);
-    const role = rolePriority.find((candidate) => roleCodes.includes(candidate));
-    if (!role)
+    const isAdministrator = session.employee.roles.some(
+      (membership) =>
+        membership.role.code === 'ADMIN' && (!membership.expiresAt || membership.expiresAt > now),
+    );
+    if (!isAdministrator)
       return reply
         .code(403)
         .send({ code: 'FORBIDDEN', messageKey: 'error.forbidden', correlationId: request.id });
     request.actor = {
       id: session.employee.id,
-      role,
-      journalIds: new Set(
-        session.employee.journalScopes
-          .filter((scope) => !scope.expiresAt || scope.expiresAt > now)
-          .map((scope) => scope.journalId),
-      ),
+      role: 'ADMIN',
+      journalIds: new Set<string>(),
       stepUpVerified: Boolean(session.stepUpUntil && session.stepUpUntil > now),
     };
     request.sessionId = session.id;
@@ -457,6 +482,52 @@ export async function createApp({
     return value.trim();
   }
 
+  function normalizedAuthorProfile(context: Record<string, Prisma.JsonValue>) {
+    const legacyName = [context.lastName, context.firstName, context.middleName]
+      .filter((value): value is string => typeof value === 'string' && value !== '-')
+      .join(' ')
+      .trim();
+    const fullName =
+      optionalContextString(context, 'fullName', 300) ??
+      (legacyName.length > 0 ? legacyName : requiredContextString(context, 'fullName', 300));
+    const rawDegreeCode = optionalContextString(context, 'degreeCode', 32);
+    const legacyDegree = optionalContextString(context, 'degree', 200);
+    const degreeCode = rawDegreeCode ?? (legacyDegree ? 'OTHER' : 'NONE');
+    if (!scientificDegreeCodes.includes(degreeCode as (typeof scientificDegreeCodes)[number]))
+      throw new BusinessRuleError('DEGREE_CODE_INVALID', 'validation.required', 422);
+    const degreeCustom =
+      degreeCode === 'OTHER'
+        ? (optionalContextString(context, 'degreeCustom', 200) ?? legacyDegree)
+        : null;
+    if (degreeCode === 'OTHER' && !degreeCustom)
+      throw new BusinessRuleError('DEGREE_CUSTOM_REQUIRED', 'validation.required', 422);
+
+    const rawTitleCode = optionalContextString(context, 'titleCode', 32);
+    const legacyTitle = optionalContextString(context, 'academicTitle', 200);
+    const titleCode = rawTitleCode ?? (legacyTitle ? 'OTHER' : 'NONE');
+    if (!academicTitleCodes.includes(titleCode as (typeof academicTitleCodes)[number]))
+      throw new BusinessRuleError('TITLE_CODE_INVALID', 'validation.required', 422);
+    const titleCustom =
+      titleCode === 'OTHER'
+        ? (optionalContextString(context, 'titleCustom', 200) ?? legacyTitle)
+        : null;
+    if (titleCode === 'OTHER' && !titleCustom)
+      throw new BusinessRuleError('TITLE_CUSTOM_REQUIRED', 'validation.required', 422);
+
+    return {
+      fullName,
+      firstName: optionalContextString(context, 'firstName', 100) ?? fullName.slice(0, 100),
+      lastName: optionalContextString(context, 'lastName', 100) ?? '-',
+      middleName: optionalContextString(context, 'middleName', 100),
+      degreeCode: degreeCode as (typeof scientificDegreeCodes)[number],
+      degreeCustom,
+      titleCode: titleCode as (typeof academicTitleCodes)[number],
+      titleCustom,
+      degree: degreeCode === 'NONE' ? null : (degreeCustom ?? degreeCode),
+      academicTitle: titleCode === 'NONE' ? null : (titleCustom ?? titleCode),
+    };
+  }
+
   function requirePermission(
     actor: ScopedActor,
     permission: Parameters<typeof hasPermission>[1],
@@ -551,10 +622,18 @@ export async function createApp({
           status: true,
           totpEnabled: true,
           totpResetRequiredAt: true,
-          roles: { select: { role: { select: { code: true } } } },
+          roles: { select: { expiresAt: true, role: { select: { code: true } } } },
         },
       });
       if (!before)
+        throw new BusinessRuleError('EMPLOYEE_NOT_FOUND', 'admin.security.employee_not_found');
+      if (
+        !before.roles.some(
+          (membership) =>
+            membership.role.code === 'ADMIN' &&
+            (!membership.expiresAt || membership.expiresAt > resetAt),
+        )
+      )
         throw new BusinessRuleError('EMPLOYEE_NOT_FOUND', 'admin.security.employee_not_found');
       if (!before.totpEnabled)
         throw new BusinessRuleError('TOTP_RESET_ALREADY_PENDING', 'error.stale_action');
@@ -653,6 +732,11 @@ export async function createApp({
       if (
         !employee ||
         employee.status !== 'ACTIVE' ||
+        !employee.roles.some(
+          (membership) =>
+            membership.role.code === 'ADMIN' &&
+            (!membership.expiresAt || membership.expiresAt > now),
+        ) ||
         (employee.lockedUntil && employee.lockedUntil > now)
       ) {
         authDenied.inc({ reason: 'login' });
@@ -683,14 +767,16 @@ export async function createApp({
             !current ||
             current.status !== 'ACTIVE' ||
             current.passwordHash !== employee.passwordHash ||
+            !current.roles.some(
+              (membership) =>
+                membership.role.code === 'ADMIN' &&
+                (!membership.expiresAt || membership.expiresAt > now),
+            ) ||
             current.totpEnabled ||
             current.totpSecretCipher ||
             !current.totpResetRequiredAt
           )
             return false;
-          const role = rolePriority.find((candidate) =>
-            current.roles.some((membership) => membership.role.code === candidate),
-          );
           await tx.staffTotpEnrollment.updateMany({
             where: { employeeId: employee.id, completedAt: null, revokedAt: null },
             data: { revokedAt: now, secretCipher: null },
@@ -714,7 +800,7 @@ export async function createApp({
             actor: {
               type: 'EMPLOYEE',
               id: employee.id,
-              ...(role ? { role } : {}),
+              role: 'ADMIN',
             },
             after: { employeeId: employee.id, expiresAt, reEnrollmentRequired: true },
           });
@@ -751,10 +837,18 @@ export async function createApp({
       const token = generateOpaqueToken();
       const csrf = generateOpaqueToken();
       const session = await serializableTransactionWithRetry(database, async (tx) => {
-        const current = await tx.employee.findUnique({ where: { id: employee.id } });
+        const current = await tx.employee.findUnique({
+          where: { id: employee.id },
+          include: { roles: { include: { role: true } } },
+        });
         if (
           !current ||
           current.status !== 'ACTIVE' ||
+          !current.roles.some(
+            (membership) =>
+              membership.role.code === 'ADMIN' &&
+              (!membership.expiresAt || membership.expiresAt > now),
+          ) ||
           !current.totpEnabled ||
           current.totpResetRequiredAt ||
           current.passwordHash !== employee.passwordHash ||
@@ -811,6 +905,7 @@ export async function createApp({
                   totpEnabled: true,
                   totpSecretCipher: true,
                   totpResetRequiredAt: true,
+                  roles: { select: { expiresAt: true, role: { select: { code: true } } } },
                 },
               },
             },
@@ -823,6 +918,11 @@ export async function createApp({
         !enrollment.secretCipher ||
         enrollment.expiresAt <= new Date() ||
         enrollment.employee.status !== 'ACTIVE' ||
+        !enrollment.employee.roles.some(
+          (membership) =>
+            membership.role.code === 'ADMIN' &&
+            (!membership.expiresAt || membership.expiresAt > new Date()),
+        ) ||
         enrollment.employee.totpEnabled ||
         enrollment.employee.totpSecretCipher ||
         !enrollment.employee.totpResetRequiredAt
@@ -923,9 +1023,16 @@ export async function createApp({
       const sessionToken = generateOpaqueToken();
       const csrf = generateOpaqueToken();
       const expiresAt = new Date(Date.now() + config.SESSION_ABSOLUTE_HOURS * 60 * 60_000);
-      const role = rolePriority.find((candidate) =>
-        enrollment.employee.roles.some((membership) => membership.role.code === candidate),
+      const isAdministrator = enrollment.employee.roles.some(
+        (membership) =>
+          membership.role.code === 'ADMIN' && (!membership.expiresAt || membership.expiresAt > now),
       );
+      if (!isAdministrator)
+        return reply.code(403).send({
+          code: 'FORBIDDEN',
+          messageKey: 'error.forbidden',
+          correlationId: request.id,
+        });
       const session = await serializableTransactionWithRetry(database, async (tx) => {
         const claimed = await tx.staffTotpEnrollment.updateMany({
           where: {
@@ -988,7 +1095,7 @@ export async function createApp({
           actor: {
             type: 'EMPLOYEE',
             id: enrollment.employeeId,
-            ...(role ? { role } : {}),
+            role: 'ADMIN',
           },
           before: { totpEnabled: false, reEnrollmentRequired: true },
           after: { totpEnabled: true, reEnrollmentRequired: false },
@@ -1316,25 +1423,87 @@ export async function createApp({
     async (request) => {
       const actor = request.actor!;
       const canReadSubmissions = hasPermission(actor.role, 'submission:read:journal');
-      const scope = canReadSubmissions
-        ? { journalId: { in: [...actor.journalIds] }, deletedAt: null }
-        : { id: { in: [] as string[] } };
-      const [total, pendingTechnical, underReview, revisions, published, failedNotifications] =
-        await Promise.all([
-          database.submission.count({ where: scope }),
-          database.submission.count({
-            where: { ...scope, status: { in: ['SUBMITTED', 'TECHNICAL_REVIEW'] } },
-          }),
-          database.submission.count({ where: { ...scope, status: 'UNDER_REVIEW' } }),
-          database.submission.count({
-            where: { ...scope, status: { in: ['REVISION_REQUESTED', 'REVISION_SUBMITTED'] } },
-          }),
-          database.submission.count({ where: { ...scope, status: 'PUBLISHED' } }),
-          hasPermission(actor.role, 'operations:read')
-            ? database.notification.count({ where: { status: { in: ['FAILED', 'DEAD_LETTER'] } } })
-            : Promise.resolve(0),
-        ]);
-      return { total, pendingTechnical, underReview, revisions, published, failedNotifications };
+      const scope = canReadSubmissions ? { deletedAt: null } : { id: { in: [] as string[] } };
+      const [
+        total,
+        newArticles,
+        pendingTechnical,
+        underReview,
+        revisions,
+        accepted,
+        rejected,
+        published,
+        failedNotifications,
+        recentSubmissions,
+        requiringAction,
+      ] = await Promise.all([
+        database.submission.count({ where: scope }),
+        database.submission.count({ where: { ...scope, status: 'SUBMITTED' } }),
+        database.submission.count({
+          where: {
+            ...scope,
+            status: {
+              in: ['SUBMITTED', 'TECHNICAL_REVIEW', 'REGISTERED', 'REVISION_SUBMITTED'],
+            },
+          },
+        }),
+        database.submission.count({
+          where: { ...scope, status: { in: ['EDITORIAL_REVIEW', 'UNDER_REVIEW'] } },
+        }),
+        database.submission.count({
+          where: { ...scope, status: { in: ['REVISION_REQUESTED', 'REVISION_SUBMITTED'] } },
+        }),
+        database.submission.count({ where: { ...scope, status: 'ACCEPTED' } }),
+        database.submission.count({ where: { ...scope, status: 'REJECTED' } }),
+        database.submission.count({ where: { ...scope, status: 'PUBLISHED' } }),
+        hasPermission(actor.role, 'operations:read')
+          ? database.notification.count({ where: { status: { in: ['FAILED', 'DEAD_LETTER'] } } })
+          : Promise.resolve(0),
+        database.submission.findMany({
+          where: scope,
+          select: {
+            id: true,
+            publicId: true,
+            status: true,
+            submittedAt: true,
+            journal: { select: { code: true } },
+            owner: {
+              select: {
+                authorProfile: { select: { fullName: true, firstName: true, lastName: true } },
+              },
+            },
+            versions: {
+              orderBy: { versionNo: 'desc' },
+              take: 1,
+              select: { metadata: { select: { titles: true } } },
+            },
+          },
+          orderBy: { submittedAt: 'desc' },
+          take: 8,
+        }),
+        database.submission.findMany({
+          where: {
+            ...scope,
+            status: { in: ['SUBMITTED', 'TECHNICAL_REVIEW', 'REGISTERED', 'REVISION_SUBMITTED'] },
+          },
+          select: { id: true, publicId: true, status: true, submittedAt: true },
+          orderBy: { submittedAt: 'asc' },
+          take: 8,
+        }),
+      ]);
+      return {
+        total,
+        newArticles,
+        pendingTechnical,
+        underReview,
+        revisions,
+        accepted,
+        rejected,
+        published,
+        failedNotifications,
+        recentSubmissions,
+        requiringAction,
+      };
     },
   );
 
@@ -1345,22 +1514,60 @@ export async function createApp({
     const rows = await database.journal.findMany({
       where: { active: true, retiredAt: null },
       include: {
-        localizations: { where: { locale: databaseLocale(locale) } },
-        currentRequirement: { select: { id: true, version: true, effectiveAt: true, state: true } },
+        localizations: true,
+        currentRequirement: {
+          select: {
+            id: true,
+            version: true,
+            effectiveAt: true,
+            state: true,
+            localizations: true,
+          },
+        },
       },
       orderBy: { code: 'asc' },
     });
     return {
       locale,
-      items: rows.map((journal) => ({
-        id: journal.id,
-        code: journal.code,
-        mode: journal.mode,
-        name: journal.localizations[0]?.name ?? journal.code,
-        description: journal.localizations[0]?.description ?? '',
-        contactText: journal.localizations[0]?.contactText ?? null,
-        requirements: journal.currentRequirement,
-      })),
+      items: rows.map((journal) => {
+        const preferences = [locale, 'ru', 'en', 'uz-Latn'].filter(
+          (value, index, values) => values.indexOf(value) === index,
+        ) as Locale[];
+        const journalLocalization = preferences
+          .map((preference) =>
+            journal.localizations.find(
+              (localization) => publicLocale(localization.locale) === preference,
+            ),
+          )
+          .find(Boolean);
+        const requirementLocalization = preferences
+          .map((preference) =>
+            journal.currentRequirement?.localizations.find(
+              (localization) => publicLocale(localization.locale) === preference,
+            ),
+          )
+          .find(Boolean);
+        return {
+          id: journal.id,
+          code: journal.code,
+          mode: journal.mode,
+          name: journalLocalization?.name ?? journal.code,
+          description: journalLocalization?.description ?? '',
+          contactText: journalLocalization?.contactText ?? null,
+          requirements: journal.currentRequirement
+            ? {
+                id: journal.currentRequirement.id,
+                version: journal.currentRequirement.version,
+                effectiveAt: journal.currentRequirement.effectiveAt,
+                state: journal.currentRequirement.state,
+                title: requirementLocalization?.title ?? '',
+                summary: requirementLocalization?.summary ?? '',
+                body: requirementLocalization?.body ?? '',
+                help: requirementLocalization?.help ?? null,
+              }
+            : null,
+        };
+      }),
     };
   });
 
@@ -1490,16 +1697,21 @@ export async function createApp({
         activeDraft: user.drafts[0] ?? null,
         profile: user.authorProfile
           ? {
-              firstName: user.authorProfile.firstName,
-              lastName: user.authorProfile.lastName,
-              middleName: user.authorProfile.middleName,
+              fullName:
+                user.authorProfile.fullName ??
+                [
+                  user.authorProfile.lastName,
+                  user.authorProfile.firstName,
+                  user.authorProfile.middleName,
+                ]
+                  .filter(Boolean)
+                  .join(' '),
               organization: user.authorProfile.organization,
               position: user.authorProfile.position,
-              degree: user.authorProfile.degree,
-              academicTitle: user.authorProfile.academicTitle,
-              country: user.authorProfile.country,
-              city: user.authorProfile.city,
-              orcid: user.authorProfile.orcid,
+              degreeCode: user.authorProfile.degreeCode ?? 'NONE',
+              degreeCustom: user.authorProfile.degreeCustom,
+              titleCode: user.authorProfile.titleCode ?? 'NONE',
+              titleCustom: user.authorProfile.titleCustom,
               email: maskEmail(
                 decryptSecret(user.authorProfile.emailCipher, config.ENCRYPTION_KEY),
               ),
@@ -1530,6 +1742,78 @@ export async function createApp({
         data: { locale: databaseLocale(body.locale) },
       });
       return { id: user.id, locale: body.locale };
+    },
+  );
+
+  app.get(
+    '/api/v1/internal/telegram/content',
+    { preHandler: authenticateService, schema: { hide: true } },
+    async (request) => {
+      const query = z
+        .object({
+          locale: z.enum(['uz-Latn', 'ru', 'en']),
+          journalId: z.uuid().optional(),
+        })
+        .strict()
+        .parse(request.query);
+      const locales = [query.locale, 'ru', 'en', 'uz-Latn'].filter(
+        (locale, index, values) => values.indexOf(locale) === index,
+      ) as Locale[];
+      const [globalContact, journalContact, contentRows] = await Promise.all([
+        database.contactProfile.findUnique({
+          where: { scopeKey: 'GLOBAL' },
+          include: { localizations: true },
+        }),
+        query.journalId
+          ? database.contactProfile.findUnique({
+              where: { journalId: query.journalId },
+              include: { localizations: true },
+            })
+          : Promise.resolve(null),
+        database.botContent.findMany({
+          where: { key: { in: [...botContentKeys] } },
+          orderBy: { updatedAt: 'desc' },
+        }),
+      ]);
+      const localizedField = (
+        profile: typeof globalContact,
+        field: 'address' | 'workingHours' | 'note',
+      ): string | null => {
+        if (!profile) return null;
+        for (const locale of locales) {
+          const found = profile.localizations.find(
+            (localization) => publicLocale(localization.locale) === locale,
+          );
+          const value = found?.[field];
+          if (value) return value;
+        }
+        return null;
+      };
+      const content = Object.fromEntries(
+        botContentKeys.map((key) => {
+          for (const locale of locales) {
+            const found = contentRows.find(
+              (item) => item.key === key && publicLocale(item.locale) === locale,
+            );
+            if (found) return [key, found.content];
+          }
+          return [key, null];
+        }),
+      );
+      return {
+        contact: {
+          phone: journalContact?.phone ?? globalContact?.phone ?? null,
+          email: journalContact?.email ?? globalContact?.email ?? null,
+          telegram: journalContact?.telegram ?? globalContact?.telegram ?? null,
+          address:
+            localizedField(journalContact, 'address') ?? localizedField(globalContact, 'address'),
+          workingHours:
+            localizedField(journalContact, 'workingHours') ??
+            localizedField(globalContact, 'workingHours'),
+          note: localizedField(journalContact, 'note') ?? localizedField(globalContact, 'note'),
+        },
+        content,
+      };
     },
   );
 
@@ -1828,18 +2112,23 @@ export async function createApp({
           context: user.authorProfile
             ? {
                 profileSnapshotAvailable: true,
-                firstName: user.authorProfile.firstName,
-                lastName: user.authorProfile.lastName,
-                middleName: user.authorProfile.middleName ?? '-',
+                fullName:
+                  user.authorProfile.fullName ??
+                  [
+                    user.authorProfile.lastName,
+                    user.authorProfile.firstName,
+                    user.authorProfile.middleName,
+                  ]
+                    .filter(Boolean)
+                    .join(' '),
                 phone: decryptSecret(user.authorProfile.phoneCipher, config.ENCRYPTION_KEY),
                 email: decryptSecret(user.authorProfile.emailCipher, config.ENCRYPTION_KEY),
                 organization: user.authorProfile.organization,
                 position: user.authorProfile.position,
-                degree: user.authorProfile.degree ?? '-',
-                academicTitle: user.authorProfile.academicTitle ?? '-',
-                country: user.authorProfile.country ?? '-',
-                city: user.authorProfile.city ?? '-',
-                orcid: user.authorProfile.orcid ?? '-',
+                degreeCode: user.authorProfile.degreeCode ?? 'NONE',
+                degreeCustom: user.authorProfile.degreeCustom,
+                titleCode: user.authorProfile.titleCode ?? 'NONE',
+                titleCustom: user.authorProfile.titleCustom,
               }
             : {},
           expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
@@ -1919,7 +2208,18 @@ export async function createApp({
         .regex(/^\d+$/)
         .parse((request.params as { telegramUserId: string }).telegramUserId);
       const body = z
-        .object({ section: z.enum(['all', 'name', 'phone', 'email', 'work', 'academic']) })
+        .object({
+          section: z.enum([
+            'all',
+            'name',
+            'phone',
+            'email',
+            'organization',
+            'position',
+            'degree',
+            'title',
+          ]),
+        })
         .strict()
         .parse(request.body);
       const user = await database.user.findUnique({
@@ -1945,34 +2245,35 @@ export async function createApp({
         profileSection: section,
         ...(profile
           ? {
-              firstName: profile.firstName,
-              lastName: profile.lastName,
-              middleName: profile.middleName ?? '-',
+              fullName:
+                profile.fullName ??
+                [profile.lastName, profile.firstName, profile.middleName].filter(Boolean).join(' '),
               phone: decryptSecret(profile.phoneCipher, config.ENCRYPTION_KEY),
               email: decryptSecret(profile.emailCipher, config.ENCRYPTION_KEY),
               organization: profile.organization,
               position: profile.position,
-              degree: profile.degree ?? '-',
-              academicTitle: profile.academicTitle ?? '-',
-              country: profile.country ?? '-',
-              city: profile.city ?? '-',
-              orcid: profile.orcid ?? '-',
+              degreeCode: profile.degreeCode ?? 'NONE',
+              degreeCustom: profile.degreeCustom,
+              titleCode: profile.titleCode ?? 'NONE',
+              titleCustom: profile.titleCustom,
             }
           : {}),
       };
       const initialState = {
-        all: 'PROFILE_LAST_NAME',
-        name: 'PROFILE_LAST_NAME',
+        all: 'PROFILE_FULL_NAME',
+        name: 'PROFILE_FULL_NAME',
         phone: 'PROFILE_PHONE',
         email: 'PROFILE_EMAIL',
-        work: 'PROFILE_ORGANIZATION',
-        academic: 'PROFILE_DEGREE',
+        organization: 'PROFILE_ORGANIZATION',
+        position: 'PROFILE_POSITION',
+        degree: 'PROFILE_DEGREE',
+        title: 'PROFILE_ACADEMIC_TITLE',
       }[section];
       const draft = await database.draft.create({
         data: {
           userId: user.id,
           machineState: initialState,
-          expectedInputType: 'TEXT',
+          expectedInputType: ['degree', 'title'].includes(section) ? 'CALLBACK' : 'TEXT',
           context,
           expiresAt: new Date(Date.now() + config.RETENTION_DRAFT_DAYS * 24 * 60 * 60_000),
         },
@@ -2013,9 +2314,7 @@ export async function createApp({
           const context = draftContext(draft.context);
           if (context.profileDraft !== true)
             throw new BusinessRuleError('PROFILE_DRAFT_INVALID', 'error.stale_action');
-          const firstName = requiredContextString(context, 'firstName', 100);
-          const lastName = requiredContextString(context, 'lastName', 100);
-          const middleName = optionalContextString(context, 'middleName', 100);
+          const profile = normalizedAuthorProfile(context);
           const phone = requiredContextString(context, 'phone', 32);
           if (!/^\+[1-9]\d{7,14}$/.test(phone))
             throw new BusinessRuleError('PHONE_INVALID', 'validation.phone', 422);
@@ -2024,50 +2323,57 @@ export async function createApp({
             throw new BusinessRuleError('EMAIL_INVALID', 'validation.email', 422);
           const organization = requiredContextString(context, 'organization', 300);
           const position = requiredContextString(context, 'position', 200);
-          const degree = optionalContextString(context, 'degree', 200);
-          const academicTitle = optionalContextString(context, 'academicTitle', 200);
-          const country = optionalContextString(context, 'country', 100);
-          const city = optionalContextString(context, 'city', 100);
-          const rawOrcid = optionalContextString(context, 'orcid', 19);
-          const parsedOrcid = rawOrcid ? orcidSchema.safeParse(rawOrcid) : null;
-          if (parsedOrcid && !parsedOrcid.success)
-            throw new BusinessRuleError('ORCID_INVALID', 'validation.orcid', 422);
+          authorProfileSchema.parse({
+            fullName: profile.fullName,
+            phone,
+            email,
+            organization,
+            position,
+            degreeCode: profile.degreeCode,
+            degreeCustom: profile.degreeCustom,
+            titleCode: profile.titleCode,
+            titleCustom: profile.titleCustom,
+          });
           const before = await tx.authorProfile.findUnique({ where: { userId: user.id } });
           const updated = await tx.authorProfile.upsert({
             where: { userId: user.id },
             update: {
-              firstName,
-              lastName,
-              middleName,
+              fullName: profile.fullName,
+              firstName: profile.firstName,
+              lastName: profile.lastName,
+              middleName: profile.middleName,
               phoneCipher: encryptSecret(phone, config.ENCRYPTION_KEY),
               phoneHash: hashOpaqueToken(phone),
               emailCipher: encryptSecret(email, config.ENCRYPTION_KEY),
               emailHash: hashOpaqueToken(email),
               organization,
               position,
-              degree,
-              academicTitle,
-              country,
-              city,
-              orcid: parsedOrcid?.data ?? null,
+              degree: profile.degree,
+              academicTitle: profile.academicTitle,
+              degreeCode: profile.degreeCode,
+              degreeCustom: profile.degreeCustom,
+              titleCode: profile.titleCode,
+              titleCustom: profile.titleCustom,
               rowVersion: { increment: 1 },
             },
             create: {
               userId: user.id,
-              firstName,
-              lastName,
-              middleName,
+              fullName: profile.fullName,
+              firstName: profile.firstName,
+              lastName: profile.lastName,
+              middleName: profile.middleName,
               phoneCipher: encryptSecret(phone, config.ENCRYPTION_KEY),
               phoneHash: hashOpaqueToken(phone),
               emailCipher: encryptSecret(email, config.ENCRYPTION_KEY),
               emailHash: hashOpaqueToken(email),
               organization,
               position,
-              degree,
-              academicTitle,
-              country,
-              city,
-              orcid: parsedOrcid?.data ?? null,
+              degree: profile.degree,
+              academicTitle: profile.academicTitle,
+              degreeCode: profile.degreeCode,
+              degreeCustom: profile.degreeCustom,
+              titleCode: profile.titleCode,
+              titleCustom: profile.titleCustom,
             },
           });
           await tx.draft.update({
@@ -2455,22 +2761,26 @@ export async function createApp({
                 },
               },
             });
-          const firstName = requiredContextString(context, 'firstName', 100);
-          const lastName = requiredContextString(context, 'lastName', 100);
-          const middleName = optionalContextString(context, 'middleName', 100);
+          const profile = normalizedAuthorProfile(context);
           const phone = requiredContextString(context, 'phone', 32);
           const email = requiredContextString(context, 'email', 320).toLowerCase();
+          if (!/^\+[1-9]\d{7,14}$/.test(phone))
+            throw new BusinessRuleError('PHONE_INVALID', 'validation.phone', 422);
+          if (!z.email().safeParse(email).success)
+            throw new BusinessRuleError('EMAIL_INVALID', 'validation.email', 422);
           const organization = requiredContextString(context, 'organization', 300);
           const position = requiredContextString(context, 'position', 200);
-          const degree = optionalContextString(context, 'degree', 200);
-          const academicTitle = optionalContextString(context, 'academicTitle', 200);
-          const country = optionalContextString(context, 'country', 100);
-          const city = optionalContextString(context, 'city', 100);
-          const rawOrcid = optionalContextString(context, 'orcid', 19);
-          const parsedOrcid = rawOrcid ? orcidSchema.safeParse(rawOrcid) : null;
-          if (parsedOrcid && !parsedOrcid.success)
-            throw new BusinessRuleError('ORCID_INVALID', 'validation.orcid', 422);
-          const orcid = parsedOrcid?.data ?? null;
+          authorProfileSchema.parse({
+            fullName: profile.fullName,
+            phone,
+            email,
+            organization,
+            position,
+            degreeCode: profile.degreeCode,
+            degreeCustom: profile.degreeCustom,
+            titleCode: profile.titleCode,
+            titleCustom: profile.titleCustom,
+          });
           const articleTitle = requiredContextString(context, 'articleTitle', 1_000);
           const articleType = requiredContextString(context, 'articleType', 100);
           const articleLanguage = requiredContextString(context, 'articleLanguage', 32);
@@ -2533,38 +2843,42 @@ export async function createApp({
           await tx.authorProfile.upsert({
             where: { userId: user.id },
             update: {
-              firstName,
-              lastName,
-              middleName,
+              fullName: profile.fullName,
+              firstName: profile.firstName,
+              lastName: profile.lastName,
+              middleName: profile.middleName,
               phoneCipher,
               phoneHash: hashOpaqueToken(phone),
               emailCipher,
               emailHash: hashOpaqueToken(email),
               organization,
               position,
-              degree,
-              academicTitle,
-              country,
-              city,
-              orcid,
+              degree: profile.degree,
+              academicTitle: profile.academicTitle,
+              degreeCode: profile.degreeCode,
+              degreeCustom: profile.degreeCustom,
+              titleCode: profile.titleCode,
+              titleCustom: profile.titleCustom,
               rowVersion: { increment: 1 },
             },
             create: {
               userId: user.id,
-              firstName,
-              lastName,
-              middleName,
+              fullName: profile.fullName,
+              firstName: profile.firstName,
+              lastName: profile.lastName,
+              middleName: profile.middleName,
               phoneCipher,
               phoneHash: hashOpaqueToken(phone),
               emailCipher,
               emailHash: hashOpaqueToken(email),
               organization,
               position,
-              degree,
-              academicTitle,
-              country,
-              city,
-              orcid,
+              degree: profile.degree,
+              academicTitle: profile.academicTitle,
+              degreeCode: profile.degreeCode,
+              degreeCustom: profile.degreeCustom,
+              titleCode: profile.titleCode,
+              titleCustom: profile.titleCustom,
             },
           });
           if (revisionSubmissionId) {
@@ -2586,16 +2900,13 @@ export async function createApp({
                 versionNo: nextVersionNo,
                 submittedById: user.id,
                 profileSnapshot: {
-                  firstName,
-                  lastName,
-                  middleName,
+                  fullName: profile.fullName,
                   organization,
                   position,
-                  degree,
-                  academicTitle,
-                  country,
-                  city,
-                  orcid,
+                  degreeCode: profile.degreeCode,
+                  degreeCustom: profile.degreeCustom,
+                  titleCode: profile.titleCode,
+                  titleCustom: profile.titleCustom,
                   emailCipher,
                   phoneCipher,
                 },
@@ -2612,16 +2923,13 @@ export async function createApp({
                 authorOrder: 1,
                 isCorresponding: true,
                 dataSnapshot: {
-                  firstName,
-                  lastName,
-                  middleName,
+                  fullName: profile.fullName,
                   organization,
                   position,
-                  degree,
-                  academicTitle,
-                  country,
-                  city,
-                  orcid,
+                  degreeCode: profile.degreeCode,
+                  degreeCustom: profile.degreeCustom,
+                  titleCode: profile.titleCode,
+                  titleCustom: profile.titleCustom,
                 },
               },
             });
@@ -2775,16 +3083,13 @@ export async function createApp({
               versionNo: 1,
               submittedById: user.id,
               profileSnapshot: {
-                firstName,
-                lastName,
-                middleName,
+                fullName: profile.fullName,
                 organization,
                 position,
-                degree,
-                academicTitle,
-                country,
-                city,
-                orcid,
+                degreeCode: profile.degreeCode,
+                degreeCustom: profile.degreeCustom,
+                titleCode: profile.titleCode,
+                titleCustom: profile.titleCustom,
                 emailCipher,
                 phoneCipher,
               },
@@ -2800,16 +3105,13 @@ export async function createApp({
               authorOrder: 1,
               isCorresponding: true,
               dataSnapshot: {
-                firstName,
-                lastName,
-                middleName,
+                fullName: profile.fullName,
                 organization,
                 position,
-                degree,
-                academicTitle,
-                country,
-                city,
-                orcid,
+                degreeCode: profile.degreeCode,
+                degreeCustom: profile.degreeCustom,
+                titleCode: profile.titleCode,
+                titleCustom: profile.titleCustom,
               },
             },
           });
@@ -3017,18 +3319,17 @@ export async function createApp({
           expiresAt: new Date(Date.now() + config.RETENTION_DRAFT_DAYS * 24 * 60 * 60_000),
           context: {
             revisionSubmissionId: submission.id,
-            firstName: profile.firstName,
-            lastName: profile.lastName,
-            middleName: profile.middleName ?? '-',
+            fullName:
+              profile.fullName ??
+              [profile.lastName, profile.firstName, profile.middleName].filter(Boolean).join(' '),
             phone: decryptSecret(profile.phoneCipher, config.ENCRYPTION_KEY),
             email: decryptSecret(profile.emailCipher, config.ENCRYPTION_KEY),
             organization: profile.organization,
             position: profile.position,
-            degree: profile.degree ?? '-',
-            academicTitle: profile.academicTitle ?? '-',
-            country: profile.country ?? '-',
-            city: profile.city ?? '-',
-            orcid: profile.orcid ?? '-',
+            degreeCode: profile.degreeCode ?? 'NONE',
+            degreeCustom: profile.degreeCustom,
+            titleCode: profile.titleCode ?? 'NONE',
+            titleCustom: profile.titleCustom,
             coauthors,
             articleTitle: firstString(latest.metadata.titles),
             articleType: latest.metadata.articleType,
@@ -3361,8 +3662,12 @@ export async function createApp({
               version: true,
               state: true,
               rowVersion: true,
+              config: true,
+              configHash: true,
+              changeNote: true,
               createdAt: true,
               createdById: true,
+              localizations: true,
             },
             orderBy: { version: 'desc' },
           },
@@ -3399,7 +3704,10 @@ export async function createApp({
             .regex(/^[A-Z0-9_-]{2,16}$/),
           mode: z.enum(['NATIVE', 'EXTERNAL_LINK', 'API_SYNC', 'CLOSED']),
           externalUrl: z.url().optional(),
+          active: z.boolean().default(true),
           fourEyesRequired: z.boolean().default(true),
+          acceptanceOpensAt: z.iso.datetime().optional(),
+          acceptanceClosesAt: z.iso.datetime().optional(),
           localizations: z
             .object({ 'uz-Latn': localization, ru: localization, en: localization })
             .strict(),
@@ -3412,13 +3720,20 @@ export async function createApp({
           messageKey: 'validation.required',
           correlationId: request.id,
         });
+      const acceptanceOpensAt = body.acceptanceOpensAt ? new Date(body.acceptanceOpensAt) : null;
+      const acceptanceClosesAt = body.acceptanceClosesAt ? new Date(body.acceptanceClosesAt) : null;
+      if (acceptanceOpensAt && acceptanceClosesAt && acceptanceOpensAt >= acceptanceClosesAt)
+        throw new BusinessRuleError('ACCEPTANCE_WINDOW_INVALID', 'validation.required', 422);
       const journal = await database.$transaction(async (tx) => {
         const created = await tx.journal.create({
           data: {
             code: body.code,
             mode: body.mode,
+            active: body.active,
             externalUrl: body.externalUrl ?? null,
             fourEyesRequired: body.fourEyesRequired,
+            acceptanceOpensAt,
+            acceptanceClosesAt,
             localizations: {
               create: Object.entries(body.localizations).map(([locale, value]) => ({
                 locale: databaseLocale(locale as Locale),
@@ -3628,6 +3943,7 @@ export async function createApp({
       const configValue = JSON.parse(JSON.stringify(validatedConfig)) as Prisma.InputJsonValue;
       const configHash = hashOpaqueToken(JSON.stringify(configValue));
       const result = await database.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`requirement-version:${journalId}`}, 0))`;
         const latest = await tx.journalRequirementVersion.findFirst({
           where: { journalId },
           orderBy: { version: 'desc' },
@@ -3665,6 +3981,109 @@ export async function createApp({
     },
   );
 
+  app.patch(
+    '/api/v1/admin/requirements/:id',
+    {
+      preHandler: [authenticateStaff, verifyCsrf],
+      schema: { tags: ['Requirements'], security: [{ staffCookie: [] }] },
+    },
+    async (request, reply) => {
+      const actor = request.actor!;
+      requirePermission(actor, 'journal:configure');
+      const id = z.uuid().parse((request.params as { id: string }).id);
+      const localization = z
+        .object({
+          title: z.string().trim().min(1).max(500),
+          summary: z.string().trim().min(1).max(20_000),
+          body: z.string().trim().min(1).max(200_000),
+          help: z.string().trim().max(50_000).nullable().optional(),
+          contact: z.string().trim().max(10_000).nullable().optional(),
+        })
+        .strict();
+      const body = z
+        .object({
+          config: z.unknown(),
+          changeNote: z.string().trim().min(1).max(2_000),
+          localizations: z
+            .object({ 'uz-Latn': localization, ru: localization, en: localization })
+            .strict(),
+          expectedRowVersion: z.number().int().nonnegative(),
+        })
+        .strict()
+        .parse(request.body);
+      const before = await database.journalRequirementVersion.findUnique({
+        where: { id },
+        include: { localizations: true },
+      });
+      if (!before)
+        return reply
+          .code(404)
+          .send({ code: 'NOT_FOUND', messageKey: 'error.system', correlationId: request.id });
+      if (!hasJournalScope(actor, before.journalId))
+        throw new TransitionDeniedError('OUT_OF_SCOPE');
+      if (before.state !== 'DRAFT')
+        return reply.code(409).send({
+          code: 'REQUIREMENT_IMMUTABLE',
+          messageKey: 'error.stale_action',
+          correlationId: request.id,
+        });
+      const validatedConfig = journalRequirementConfigSchema.parse(body.config);
+      const configValue = JSON.parse(JSON.stringify(validatedConfig)) as Prisma.InputJsonValue;
+      const configHash = hashOpaqueToken(JSON.stringify(configValue));
+      const updated = await database.$transaction(async (tx) => {
+        const mutation = await tx.journalRequirementVersion.updateMany({
+          where: { id, state: 'DRAFT', rowVersion: body.expectedRowVersion },
+          data: {
+            config: configValue,
+            configHash,
+            changeNote: body.changeNote,
+            rowVersion: { increment: 1 },
+          },
+        });
+        if (mutation.count !== 1)
+          throw new BusinessRuleError('STALE_ACTION', 'error.stale_action', 409);
+        for (const [locale, value] of Object.entries(body.localizations)) {
+          const localeValue = databaseLocale(locale as Locale);
+          await tx.requirementLocalization.upsert({
+            where: {
+              requirementVersionId_locale: { requirementVersionId: id, locale: localeValue },
+            },
+            update: {
+              title: value.title,
+              summary: value.summary,
+              body: value.body,
+              help: value.help ?? null,
+              contact: value.contact ?? null,
+            },
+            create: {
+              requirementVersionId: id,
+              locale: localeValue,
+              title: value.title,
+              summary: value.summary,
+              body: value.body,
+              help: value.help ?? null,
+              contact: value.contact ?? null,
+            },
+          });
+        }
+        const after = await tx.journalRequirementVersion.findUniqueOrThrow({
+          where: { id },
+          include: { localizations: true },
+        });
+        await appendAudit(tx, request, {
+          action: 'journal.requirement.updated',
+          entity: 'JournalRequirementVersion',
+          entityId: id,
+          journalId: before.journalId,
+          before,
+          after,
+        });
+        return after;
+      });
+      return updated;
+    },
+  );
+
   app.post(
     '/api/v1/admin/requirements/:id/state',
     {
@@ -3675,7 +4094,7 @@ export async function createApp({
       const id = z.uuid().parse((request.params as { id: string }).id);
       const body = z
         .object({
-          targetState: z.enum(['REVIEW', 'APPROVED', 'PUBLISHED', 'RETIRED']),
+          targetState: z.enum(['DRAFT', 'REVIEW', 'APPROVED', 'PUBLISHED', 'RETIRED']),
           expectedRowVersion: z.number().int().nonnegative(),
         })
         .strict()
@@ -3757,6 +4176,18 @@ export async function createApp({
       const query = z
         .object({
           status: z.enum(submissionStatuses).optional(),
+          group: z
+            .enum([
+              'new',
+              'action',
+              'review',
+              'revision',
+              'accepted',
+              'rejected',
+              'published',
+              'all',
+            ])
+            .optional(),
           journalId: z.uuid().optional(),
           q: z.string().trim().min(1).max(200).optional(),
           cursor: z.uuid().optional(),
@@ -3766,6 +4197,17 @@ export async function createApp({
       if (query.journalId && !hasJournalScope(actor, query.journalId))
         throw new TransitionDeniedError('OUT_OF_SCOPE');
       const search = query.q;
+      const groupedStatuses: Record<string, (typeof submissionStatuses)[number][]> = {
+        new: ['SUBMITTED'],
+        action: ['SUBMITTED', 'TECHNICAL_REVIEW', 'REGISTERED', 'REVISION_SUBMITTED'],
+        review: ['EDITORIAL_REVIEW', 'UNDER_REVIEW'],
+        revision: ['REVISION_REQUESTED', 'REVISION_SUBMITTED'],
+        accepted: ['ACCEPTED', 'COPYEDITING', 'LAYOUT'],
+        rejected: ['REJECTED'],
+        published: ['PUBLISHED'],
+        all: [],
+      };
+      const selectedGroupStatuses = query.group ? groupedStatuses[query.group] : undefined;
       const titleFilters: Prisma.SubmissionWhereInput[] = search
         ? ['uz-Latn', 'uz', 'ru', 'en'].map((locale) => ({
             versions: {
@@ -3778,10 +4220,12 @@ export async function createApp({
           }))
         : [];
       const submissionWhere: Prisma.SubmissionWhereInput = {
-        ...(query.journalId
-          ? { journalId: query.journalId }
-          : { journalId: { in: [...actor.journalIds] } }),
-        ...(query.status ? { status: query.status } : {}),
+        ...(query.journalId ? { journalId: query.journalId } : {}),
+        ...(query.status
+          ? { status: query.status }
+          : selectedGroupStatuses && selectedGroupStatuses.length > 0
+            ? { status: { in: selectedGroupStatuses } }
+            : {}),
         ...(search
           ? {
               OR: [
@@ -3794,7 +4238,19 @@ export async function createApp({
       };
       const rows = await database.submission.findMany({
         where: submissionWhere,
-        include: { journal: { select: { code: true } } },
+        include: {
+          journal: { select: { code: true } },
+          owner: {
+            select: {
+              authorProfile: { select: { fullName: true, firstName: true, lastName: true } },
+            },
+          },
+          versions: {
+            orderBy: { versionNo: 'desc' },
+            take: 1,
+            select: { metadata: { select: { titles: true } } },
+          },
+        },
         orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
         take: query.limit + 1,
         ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
@@ -3819,7 +4275,14 @@ export async function createApp({
         where: { id },
         include: {
           journal: { include: { localizations: true } },
-          owner: { select: { id: true, locale: true, username: true } },
+          owner: {
+            select: {
+              id: true,
+              locale: true,
+              username: true,
+              authorProfile: { select: { fullName: true, firstName: true, lastName: true } },
+            },
+          },
           requirementVersion: { include: { localizations: true } },
           versions: {
             orderBy: { versionNo: 'desc' },
@@ -3854,7 +4317,7 @@ export async function createApp({
           },
           reviewAssignments: {
             include: {
-              reviewer: { include: { employee: { select: { displayName: true } } } },
+              reviewer: { select: { id: true, displayName: true } },
               review: true,
             },
             orderBy: { assignedAt: 'desc' },
@@ -3919,8 +4382,7 @@ export async function createApp({
         hasPermission(actor.role, 'file:read:journal') &&
         [...journalIds].some((journalId) => hasJournalScope(actor, journalId));
       const canReadAssignedAnonymized =
-        hasPermission(actor.role, 'file:read:anonymized') &&
-        file.reviewAssignments.some((assignment) => assignment.reviewer.employeeId === actor.id);
+        hasPermission(actor.role, 'file:read:anonymized') && file.reviewAssignments.length > 0;
       if (!canReadJournalFile && !canReadAssignedAnonymized)
         throw new TransitionDeniedError('FORBIDDEN');
       const authorizedJournalId = [...journalIds][0];
@@ -3961,7 +4423,6 @@ export async function createApp({
       const body = z
         .object({
           employeeId: z.uuid(),
-          kind: z.enum(['OPERATOR', 'EDITOR']),
           reason: z.string().trim().min(1).max(2_000),
           deadline: z.iso.datetime().optional(),
         })
@@ -3973,7 +4434,7 @@ export async function createApp({
         database.submission.findUnique({ where: { id: submissionId } }),
         database.employee.findUnique({
           where: { id: body.employeeId },
-          include: { roles: { include: { role: true } }, journalScopes: true },
+          include: { roles: { include: { role: true } } },
         }),
       ]);
       if (!submission || !employee)
@@ -3982,11 +4443,13 @@ export async function createApp({
           .send({ code: 'NOT_FOUND', messageKey: 'error.system', correlationId: request.id });
       if (!hasJournalScope(actor, submission.journalId))
         throw new TransitionDeniedError('OUT_OF_SCOPE');
-      const requiredRole = body.kind;
       if (
         employee.status !== 'ACTIVE' ||
-        !employee.roles.some((membership) => membership.role.code === requiredRole) ||
-        !employee.journalScopes.some((scope) => scope.journalId === submission.journalId)
+        !employee.roles.some(
+          (membership) =>
+            membership.role.code === 'ADMIN' &&
+            (!membership.expiresAt || membership.expiresAt > new Date()),
+        )
       )
         return reply.code(422).send({
           code: 'ASSIGNEE_INELIGIBLE',
@@ -3997,7 +4460,7 @@ export async function createApp({
         await tx.assignment.updateMany({
           where: {
             submissionId,
-            kind: body.kind,
+            kind: 'ADMIN',
             status: { in: ['PENDING', 'ACCEPTED'] },
           },
           data: { status: 'CANCELLED', completedAt: new Date() },
@@ -4007,7 +4470,7 @@ export async function createApp({
             submissionId,
             employeeId: employee.id,
             journalId: submission.journalId,
-            kind: body.kind,
+            kind: 'ADMIN',
             reason: body.reason,
             assignedById: actor.id,
             ...(body.deadline ? { deadline: new Date(body.deadline) } : {}),
@@ -4075,37 +4538,36 @@ export async function createApp({
         ? await database.employee.findMany({
             where: {
               status: 'ACTIVE',
-              journalScopes: { some: { journalId: submission.journalId } },
-              roles: { some: { role: { code: { in: ['OPERATOR', 'EDITOR'] } } } },
+              roles: {
+                some: {
+                  role: { code: 'ADMIN' },
+                  OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+                },
+              },
             },
             select: {
               id: true,
               displayName: true,
-              roles: { select: { role: { select: { code: true } } } },
             },
             orderBy: { displayName: 'asc' },
           })
         : [];
       const reviewers = canAssignReviewers
         ? await database.reviewerProfile.findMany({
-            where: { active: true, employee: { status: 'ACTIVE' } },
+            where: { active: true },
             select: {
               id: true,
+              displayName: true,
               affiliation: true,
-              employee: { select: { displayName: true } },
             },
-            orderBy: { employee: { displayName: 'asc' } },
+            orderBy: { displayName: 'asc' },
           })
         : [];
       const approvedPackageIds = new Set(
         submission.versions[0]?.preflightRuns.map((run) => run.fileId) ?? [],
       );
       return {
-        employees: employees.map((employee) => ({
-          id: employee.id,
-          displayName: employee.displayName,
-          roles: employee.roles.map((membership) => membership.role.code),
-        })),
+        employees,
         reviewers,
         files:
           submission.versions[0]?.files
@@ -4295,7 +4757,6 @@ export async function createApp({
         database.submission.findUnique({ where: { id: submissionId } }),
         database.reviewerProfile.findUnique({
           where: { id: body.reviewerId },
-          include: { employee: true },
         }),
         database.submissionFile.findFirst({
           where: {
@@ -4322,7 +4783,7 @@ export async function createApp({
           .send({ code: 'NOT_FOUND', messageKey: 'error.system', correlationId: request.id });
       if (!hasJournalScope(actor, submission.journalId))
         throw new TransitionDeniedError('OUT_OF_SCOPE');
-      if (!reviewer.active || reviewer.employee.status !== 'ACTIVE')
+      if (!reviewer.active)
         return reply.code(422).send({
           code: 'REVIEWER_INELIGIBLE',
           messageKey: 'validation.required',
@@ -4495,15 +4956,12 @@ export async function createApp({
     },
     async (request) => {
       requirePermission(request.actor!, 'review:read:assigned');
-      const reviewer = await database.reviewerProfile.findUnique({
-        where: { employeeId: request.actor!.id },
-      });
-      if (!reviewer) return { items: [] };
       return {
         items: await database.reviewAssignment.findMany({
-          where: { reviewerId: reviewer.id, status: { not: 'CANCELLED' } },
+          where: { status: { not: 'CANCELLED' } },
           include: {
             submission: { select: { publicId: true, status: true, journalId: true } },
+            reviewer: { select: { id: true, displayName: true } },
             review: true,
           },
           orderBy: { deadline: 'asc' },
@@ -4535,8 +4993,12 @@ export async function createApp({
         where: { id },
         include: { reviewer: true, submission: true },
       });
-      if (!assignment || assignment.reviewer.employeeId !== request.actor!.id)
-        throw new TransitionDeniedError('FORBIDDEN');
+      if (!assignment)
+        return reply
+          .code(404)
+          .send({ code: 'NOT_FOUND', messageKey: 'error.system', correlationId: request.id });
+      if (!hasJournalScope(request.actor!, assignment.submission.journalId))
+        throw new TransitionDeniedError('OUT_OF_SCOPE');
       const updated = await database.$transaction(async (tx) => {
         const mutation = await tx.reviewAssignment.updateMany({
           where: { id, status: 'PENDING' },
@@ -4583,8 +5045,12 @@ export async function createApp({
         where: { id },
         include: { reviewer: true, submission: true, review: true },
       });
-      if (!assignment || assignment.reviewer.employeeId !== request.actor!.id)
-        throw new TransitionDeniedError('FORBIDDEN');
+      if (!assignment)
+        return reply
+          .code(404)
+          .send({ code: 'NOT_FOUND', messageKey: 'error.system', correlationId: request.id });
+      if (!hasJournalScope(request.actor!, assignment.submission.journalId))
+        throw new TransitionDeniedError('OUT_OF_SCOPE');
       if (assignment.status !== 'ACCEPTED' || assignment.review)
         return reply.code(409).send({
           code: 'REVIEW_NOT_ACCEPTED',
@@ -4629,42 +5095,22 @@ export async function createApp({
     async (request, reply) => {
       const actor = request.actor!;
       requirePermission(actor, 'user:manage');
-      requirePermission(actor, 'role:manage');
-      const body = z
-        .object({
+      const body = staffStepUpSchema
+        .extend({
           email: z.email(),
           displayName: z.string().trim().min(2).max(200),
-          role: z.enum([
-            'OPERATOR',
-            'EDITOR',
-            'REVIEWER',
-            'CHIEF_EDITOR',
-            'CONTENT_ADMIN',
-            'ADMIN',
-            'AUDITOR',
-          ]),
-          journalIds: z.array(z.uuid()).max(100).default([]),
-          reviewerAffiliation: z.string().trim().min(2).max(300).optional(),
-          reviewerExpertise: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
         })
-        .strict()
         .parse(request.body);
-      if (body.role === 'REVIEWER' && !body.reviewerAffiliation)
-        return reply.code(422).send({
-          code: 'REVIEWER_AFFILIATION_REQUIRED',
-          messageKey: 'validation.required',
+      if (!(await verifyStaffStepUpCredentials(actor.id, body.currentPassword, body.currentTotp))) {
+        authDenied.inc({ reason: 'step_up' });
+        return reply.code(403).send({
+          code: 'STEP_UP_AUTH_FAILED',
+          messageKey: 'admin.security.invalid_credentials',
           correlationId: request.id,
         });
-      const [role, journalCount] = await Promise.all([
-        database.role.findUnique({ where: { code: body.role } }),
-        database.journal.count({ where: { id: { in: body.journalIds }, retiredAt: null } }),
-      ]);
-      if (!role || journalCount !== new Set(body.journalIds).size)
-        return reply.code(422).send({
-          code: 'MEMBERSHIP_INVALID',
-          messageKey: 'validation.required',
-          correlationId: request.id,
-        });
+      }
+      const role = await database.role.findUnique({ where: { code: 'ADMIN' } });
+      if (!role) throw new Error('ADMIN_ROLE_NOT_BOOTSTRAPPED');
       const invitationToken = generateOpaqueToken();
       const expiresAt = new Date(Date.now() + 24 * 60 * 60_000);
       const totpSecret = generateTotpSecret();
@@ -4676,22 +5122,6 @@ export async function createApp({
             status: 'INVITED',
             totpSecretCipher: encryptSecret(totpSecret, config.ENCRYPTION_KEY),
             roles: { create: { roleId: role.id, grantedBy: actor.id } },
-            journalScopes: {
-              create: [...new Set(body.journalIds)].map((journalId) => ({
-                journalId,
-                grantedBy: actor.id,
-              })),
-            },
-            ...(body.role === 'REVIEWER'
-              ? {
-                  reviewerProfile: {
-                    create: {
-                      affiliation: body.reviewerAffiliation!,
-                      expertise: body.reviewerExpertise ?? [],
-                    },
-                  },
-                }
-              : {}),
           },
           select: { id: true, email: true, displayName: true, status: true, createdAt: true },
         });
@@ -4707,7 +5137,7 @@ export async function createApp({
           action: 'employee.invited',
           entity: 'Employee',
           entityId: employee.id,
-          after: { ...employee, role: body.role, journalIds: body.journalIds },
+          after: { ...employee, role: 'ADMIN' },
         });
         return employee;
       });
@@ -4725,12 +5155,6 @@ export async function createApp({
     async (request, reply) => {
       const actor = request.actor!;
       requirePermission(actor, 'user:manage');
-      if (actor.role !== 'ADMIN')
-        return reply.code(403).send({
-          code: 'FORBIDDEN',
-          messageKey: 'error.forbidden',
-          correlationId: request.id,
-        });
       const employeeId = z.uuid().parse((request.params as { id: string }).id);
       if (employeeId === actor.id)
         return reply.code(409).send({
@@ -4761,26 +5185,20 @@ export async function createApp({
       const actor = request.actor!;
       requirePermission(actor, 'user:manage');
       const id = z.uuid().parse((request.params as { id: string }).id);
-      const roleSchema = z.enum([
-        'OPERATOR',
-        'EDITOR',
-        'REVIEWER',
-        'CHIEF_EDITOR',
-        'CONTENT_ADMIN',
-        'ADMIN',
-        'AUDITOR',
-      ]);
-      const body = z
-        .object({
-          status: z.enum(['ACTIVE', 'SUSPENDED', 'DISABLED']).optional(),
-          roles: z.array(roleSchema).min(1).max(8).optional(),
-          journalIds: z.array(z.uuid()).max(100).optional(),
+      const body = staffStepUpSchema
+        .extend({
+          status: z.enum(['ACTIVE', 'SUSPENDED', 'DISABLED']),
         })
-        .strict()
-        .refine((value) => Object.values(value).some((entry) => entry !== undefined))
         .parse(request.body);
-      if (body.roles || body.journalIds) requirePermission(actor, 'role:manage');
-      if (id === actor.id && body.status && body.status !== 'ACTIVE')
+      if (!(await verifyStaffStepUpCredentials(actor.id, body.currentPassword, body.currentTotp))) {
+        authDenied.inc({ reason: 'step_up' });
+        return reply.code(403).send({
+          code: 'STEP_UP_AUTH_FAILED',
+          messageKey: 'admin.security.invalid_credentials',
+          correlationId: request.id,
+        });
+      }
+      if (id === actor.id && body.status !== 'ACTIVE')
         return reply.code(409).send({
           code: 'SELF_DISABLE_FORBIDDEN',
           messageKey: 'error.forbidden',
@@ -4793,77 +5211,67 @@ export async function createApp({
           email: true,
           displayName: true,
           status: true,
-          roles: { select: { role: { select: { code: true } } } },
-          journalScopes: { select: { journalId: true } },
+          roles: { select: { expiresAt: true, role: { select: { code: true } } } },
         },
       });
       if (!before)
         return reply
           .code(404)
           .send({ code: 'NOT_FOUND', messageKey: 'error.system', correlationId: request.id });
-      const uniqueRoles = [...new Set(body.roles ?? [])];
-      const uniqueJournals = [...new Set(body.journalIds ?? [])];
-      const [selectedRoles, journalCount, reviewerProfile] = await Promise.all([
-        body.roles
-          ? database.role.findMany({ where: { code: { in: uniqueRoles } }, select: { id: true } })
-          : Promise.resolve([]),
-        body.journalIds
-          ? database.journal.count({ where: { id: { in: uniqueJournals }, retiredAt: null } })
-          : Promise.resolve(0),
-        body.roles?.includes('REVIEWER')
-          ? database.reviewerProfile.findUnique({ where: { employeeId: id }, select: { id: true } })
-          : Promise.resolve(null),
-      ]);
       if (
-        (body.roles && selectedRoles.length !== uniqueRoles.length) ||
-        (body.journalIds && journalCount !== uniqueJournals.length) ||
-        (body.roles?.includes('REVIEWER') && !reviewerProfile)
+        !before.roles.some(
+          (membership) =>
+            membership.role.code === 'ADMIN' &&
+            (!membership.expiresAt || membership.expiresAt > new Date()),
+        )
       )
-        return reply.code(422).send({
-          code: 'MEMBERSHIP_INVALID',
-          messageKey: 'validation.required',
-          correlationId: request.id,
+        return reply
+          .code(404)
+          .send({ code: 'NOT_FOUND', messageKey: 'error.system', correlationId: request.id });
+      if (body.status === 'ACTIVE') {
+        const security = await database.employee.findUnique({
+          where: { id },
+          select: { passwordHash: true, totpEnabled: true, totpResetRequiredAt: true },
         });
-      const after = await database.$transaction(async (tx) => {
-        if (body.roles) {
-          await tx.employeeRole.deleteMany({ where: { employeeId: id } });
-          await tx.employeeRole.createMany({
-            data: selectedRoles.map((role) => ({
-              employeeId: id,
-              roleId: role.id,
-              grantedBy: actor.id,
-            })),
+        if (!security?.passwordHash || !security.totpEnabled || security.totpResetRequiredAt)
+          return reply.code(409).send({
+            code: 'ADMIN_SECURITY_ENROLLMENT_REQUIRED',
+            messageKey: 'admin.security.enrollment_required',
+            correlationId: request.id,
           });
-          await tx.reviewerProfile.updateMany({
-            where: { employeeId: id },
-            data: { active: body.roles.includes('REVIEWER') },
-          });
-        }
-        if (body.journalIds) {
-          await tx.employeeJournalScope.deleteMany({ where: { employeeId: id } });
-          await tx.employeeJournalScope.createMany({
-            data: uniqueJournals.map((journalId) => ({
-              employeeId: id,
-              journalId,
-              grantedBy: actor.id,
-            })),
-          });
-        }
-        if (body.status)
-          await tx.employee.update({
-            where: { id },
-            data: {
-              status: body.status,
-              disabledAt: body.status === 'DISABLED' ? new Date() : null,
-              ...(body.status !== 'ACTIVE'
-                ? {
-                    sessions: {
-                      updateMany: { where: { revokedAt: null }, data: { revokedAt: new Date() } },
-                    },
-                  }
-                : {}),
+      }
+      const after = await serializableTransactionWithRetry(database, async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('active-admin-guard', 0))`;
+        if (before.status === 'ACTIVE' && body.status !== 'ACTIVE') {
+          const activeAdministrators = await tx.employee.count({
+            where: {
+              status: 'ACTIVE',
+              roles: {
+                some: {
+                  role: { code: 'ADMIN' },
+                  OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+                },
+              },
             },
           });
+          if (activeAdministrators <= 1)
+            throw new BusinessRuleError('LAST_ACTIVE_ADMIN', 'error.forbidden', 409);
+        }
+        const now = new Date();
+        await tx.employee.update({
+          where: { id },
+          data: {
+            status: body.status,
+            disabledAt: body.status === 'DISABLED' ? now : null,
+            ...(body.status !== 'ACTIVE'
+              ? {
+                  sessions: {
+                    updateMany: { where: { revokedAt: null }, data: { revokedAt: now } },
+                  },
+                }
+              : {}),
+          },
+        });
         const updated = await tx.employee.findUniqueOrThrow({
           where: { id },
           select: {
@@ -4872,7 +5280,6 @@ export async function createApp({
             displayName: true,
             status: true,
             roles: { select: { role: { select: { code: true } } } },
-            journalScopes: { select: { journalId: true } },
           },
         });
         await appendAudit(tx, request, {
@@ -4895,6 +5302,7 @@ export async function createApp({
       requirePermission(request.actor!, 'role:manage');
       return {
         items: await database.role.findMany({
+          where: { code: 'ADMIN' },
           include: { permissions: { include: { permission: true } } },
           orderBy: { code: 'asc' },
         }),
@@ -4908,18 +5316,32 @@ export async function createApp({
     async (request) => {
       requirePermission(request.actor!, 'user:manage');
       const items = await database.employee.findMany({
-        include: {
-          roles: { include: { role: true } },
-          journalScopes: { include: { journal: { select: { code: true } } } },
+        where: {
+          roles: {
+            some: {
+              role: { code: 'ADMIN' },
+              OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+            },
+          },
+        },
+        select: {
+          id: true,
+          email: true,
+          displayName: true,
+          totpEnabled: true,
+          totpResetRequiredAt: true,
+          status: true,
+          lockedUntil: true,
+          lastLoginAt: true,
+          createdAt: true,
+          updatedAt: true,
+          disabledAt: true,
+          roles: { select: { expiresAt: true, role: { select: { code: true } } } },
         },
         orderBy: { createdAt: 'desc' },
         take: 200,
       });
-      return {
-        items: items.map(
-          ({ passwordHash: _passwordHash, totpSecretCipher: _totpSecret, ...employee }) => employee,
-        ),
-      };
+      return { items };
     },
   );
 
@@ -4932,13 +5354,67 @@ export async function createApp({
     async (request) => {
       requirePermission(request.actor!, 'review:assign');
       const items = await database.reviewerProfile.findMany({
-        include: {
-          employee: { select: { id: true, displayName: true, email: true, status: true } },
+        select: {
+          id: true,
+          displayName: true,
+          email: true,
+          phone: true,
+          affiliation: true,
+          expertise: true,
+          active: true,
+          createdAt: true,
+          updatedAt: true,
           _count: { select: { assignments: true } },
         },
         orderBy: { createdAt: 'desc' },
       });
       return { items };
+    },
+  );
+
+  app.post(
+    '/api/v1/admin/reviewers',
+    {
+      preHandler: [authenticateStaff, verifyCsrf],
+      schema: { tags: ['Reviewers'], security: [{ staffCookie: [] }] },
+    },
+    async (request, reply) => {
+      requirePermission(request.actor!, 'review:assign');
+      const body = z
+        .object({
+          displayName: z.string().trim().min(2).max(200),
+          email: z.email().optional(),
+          phone: z
+            .string()
+            .trim()
+            .regex(/^\+?[0-9 ()-]{7,32}$/)
+            .optional(),
+          affiliation: z.string().trim().min(1).max(300),
+          expertise: z.array(z.string().trim().min(1).max(200)).max(50),
+          active: z.boolean().default(true),
+        })
+        .strict()
+        .parse(request.body);
+      const reviewer = await database.$transaction(async (tx) => {
+        const created = await tx.reviewerProfile.create({
+          data: {
+            displayName: body.displayName,
+            email: body.email ?? null,
+            phone: body.phone ?? null,
+            affiliation: body.affiliation,
+            expertise: body.expertise,
+            active: body.active,
+          },
+        });
+        await appendAudit(tx, request, {
+          action: 'reviewer.created',
+          entity: 'ReviewerProfile',
+          entityId: created.id,
+          after: created,
+        });
+        return created;
+      });
+      return reply.code(201).send(reviewer);
     },
   );
 
@@ -4953,6 +5429,13 @@ export async function createApp({
       const id = z.uuid().parse((request.params as { id: string }).id);
       const body = z
         .object({
+          displayName: z.string().trim().min(2).max(200),
+          email: z.email().nullable(),
+          phone: z
+            .string()
+            .trim()
+            .regex(/^\+?[0-9 ()-]{7,32}$/)
+            .nullable(),
           affiliation: z.string().trim().min(1).max(300),
           expertise: z.array(z.string().trim().min(1).max(200)).max(50),
           active: z.boolean(),
@@ -4967,7 +5450,7 @@ export async function createApp({
       const after = await database.$transaction(async (tx) => {
         const updated = await tx.reviewerProfile.update({
           where: { id },
-          data: { affiliation: body.affiliation, expertise: body.expertise, active: body.active },
+          data: body,
         });
         await appendAudit(tx, request, {
           action: 'reviewer.updated',
@@ -4979,6 +5462,163 @@ export async function createApp({
         return updated;
       });
       return after;
+    },
+  );
+
+  app.get(
+    '/api/v1/admin/telegram-content',
+    {
+      preHandler: authenticateStaff,
+      schema: { tags: ['Telegram content'], security: [{ staffCookie: [] }] },
+    },
+    async (request) => {
+      requirePermission(request.actor!, 'translation:configure');
+      const [contacts, content] = await Promise.all([
+        database.contactProfile.findMany({
+          include: {
+            journal: { select: { id: true, code: true } },
+            localizations: { orderBy: { locale: 'asc' } },
+          },
+          orderBy: [{ journalId: 'asc' }, { scopeKey: 'asc' }],
+        }),
+        database.botContent.findMany({ orderBy: [{ key: 'asc' }, { locale: 'asc' }] }),
+      ]);
+      return {
+        contacts: contacts.map((contact) => ({
+          ...contact,
+          localizations: contact.localizations.map((localization) => ({
+            ...localization,
+            locale: publicLocale(localization.locale),
+          })),
+        })),
+        content: content.map((item) => ({ ...item, locale: publicLocale(item.locale) })),
+        allowedContentKeys: botContentKeys,
+      };
+    },
+  );
+
+  app.put(
+    '/api/v1/admin/telegram-content/contact',
+    {
+      preHandler: [authenticateStaff, verifyCsrf],
+      schema: { tags: ['Telegram content'], security: [{ staffCookie: [] }] },
+    },
+    async (request, reply) => {
+      requirePermission(request.actor!, 'translation:configure');
+      const body = contactInputSchema.parse(request.body);
+      if (body.journalId) {
+        const journal = await database.journal.findUnique({
+          where: { id: body.journalId },
+          select: { id: true },
+        });
+        if (!journal)
+          return reply
+            .code(404)
+            .send({ code: 'NOT_FOUND', messageKey: 'error.system', correlationId: request.id });
+      }
+      const scopeKey = body.journalId ? `JOURNAL:${body.journalId}` : 'GLOBAL';
+      const existing = await database.contactProfile.findUnique({
+        where: { scopeKey },
+        include: { localizations: true },
+      });
+      const result = await database.$transaction(async (tx) => {
+        const contact = await tx.contactProfile.upsert({
+          where: { scopeKey },
+          update: {
+            journalId: body.journalId,
+            phone: body.phone,
+            email: body.email,
+            telegram: body.telegram,
+          },
+          create: {
+            scopeKey,
+            journalId: body.journalId,
+            phone: body.phone,
+            email: body.email,
+            telegram: body.telegram,
+          },
+        });
+        for (const localization of body.localizations) {
+          await tx.contactLocalization.upsert({
+            where: {
+              contactProfileId_locale: {
+                contactProfileId: contact.id,
+                locale: databaseLocale(localization.locale),
+              },
+            },
+            update: {
+              address: localization.address,
+              workingHours: localization.workingHours,
+              note: localization.note,
+            },
+            create: {
+              contactProfileId: contact.id,
+              locale: databaseLocale(localization.locale),
+              address: localization.address,
+              workingHours: localization.workingHours,
+              note: localization.note,
+            },
+          });
+        }
+        const updated = await tx.contactProfile.findUniqueOrThrow({
+          where: { id: contact.id },
+          include: { localizations: true },
+        });
+        await appendAudit(tx, request, {
+          action: 'telegram.contact.updated',
+          entity: 'ContactProfile',
+          entityId: contact.id,
+          ...(body.journalId ? { journalId: body.journalId } : {}),
+          before: existing,
+          after: updated,
+        });
+        return updated;
+      });
+      return result;
+    },
+  );
+
+  app.put(
+    '/api/v1/admin/telegram-content/items/:key',
+    {
+      preHandler: [authenticateStaff, verifyCsrf],
+      schema: { tags: ['Telegram content'], security: [{ staffCookie: [] }] },
+    },
+    async (request) => {
+      requirePermission(request.actor!, 'translation:configure');
+      const key = z.enum(botContentKeys).parse((request.params as { key: string }).key);
+      const body = z
+        .object({
+          uzLatn: z.string().trim().min(1).max(10_000),
+          ru: z.string().trim().min(1).max(10_000),
+          en: z.string().trim().min(1).max(10_000),
+        })
+        .strict()
+        .parse(request.body);
+      const before = await database.botContent.findMany({ where: { key } });
+      const result = await database.$transaction(async (tx) => {
+        for (const [locale, content] of [
+          ['uz-Latn', body.uzLatn],
+          ['ru', body.ru],
+          ['en', body.en],
+        ] as const) {
+          await tx.botContent.upsert({
+            where: { key_locale: { key, locale: databaseLocale(locale) } },
+            update: { content },
+            create: { key, locale: databaseLocale(locale), content },
+          });
+        }
+        const updated = await tx.botContent.findMany({ where: { key } });
+        await appendAudit(tx, request, {
+          action: 'telegram.content.updated',
+          entity: 'BotContent',
+          ...(updated[0] ? { entityId: updated[0].id } : {}),
+          before,
+          after: updated,
+        });
+        return updated;
+      });
+      return { items: result.map((item) => ({ ...item, locale: publicLocale(item.locale) })) };
     },
   );
 
@@ -5565,15 +6205,14 @@ export async function createApp({
     },
     async (request) => {
       requirePermission(request.actor!, 'export:create');
-      const actor = request.actor!;
       const byStatus = await database.submission.groupBy({
         by: ['status'],
-        where: { journalId: { in: [...actor.journalIds] }, deletedAt: null },
+        where: { deletedAt: null },
         _count: { _all: true },
       });
       const byJournal = await database.submission.groupBy({
         by: ['journalId'],
-        where: { journalId: { in: [...actor.journalIds] }, deletedAt: null },
+        where: { deletedAt: null },
         _count: { _all: true },
       });
       return { generatedAt: new Date().toISOString(), byStatus, byJournal };
@@ -5613,9 +6252,6 @@ export async function createApp({
         items: await database.notification.findMany({
           where: {
             ...(query.status ? { status: query.status } : {}),
-            ...(actor.role === 'ADMIN' || actor.role === 'AUDITOR'
-              ? {}
-              : { submission: { journalId: { in: [...actor.journalIds] } } }),
           },
           select: {
             id: true,
@@ -5647,9 +6283,6 @@ export async function createApp({
       requirePermission(actor, 'export:create');
       const rows = await database.submission.findMany({
         where: {
-          ...(actor.role === 'AUDITOR' || actor.role === 'ADMIN'
-            ? {}
-            : { journalId: { in: [...actor.journalIds] } }),
           deletedAt: null,
         },
         select: {
@@ -5863,7 +6496,7 @@ export async function createApp({
           requiredFileRuns.length > 0 &&
           requiredFileRuns.every((run) => run?.status === 'COMPLETED' && run.blockingCount === 0),
         ),
-        assignedEditor: submission.assignments.some((assignment) => assignment.kind === 'EDITOR'),
+        assignedEditor: submission.assignments.some((assignment) => assignment.kind === 'ADMIN'),
         requiredReviewersAssigned:
           requiredReviewerCount > 0 && submission.reviewAssignments.length >= requiredReviewerCount,
         anonymizedPackageReady:

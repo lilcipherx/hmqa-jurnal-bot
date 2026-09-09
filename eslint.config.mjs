@@ -31,7 +31,12 @@ export default tseslint.config(
     },
   },
   {
-    files: ['scripts/*.mjs', 'tests/fixtures/*.mjs', 'apps/*/test-fixtures/*.mjs'],
+    files: [
+      'scripts/*.mjs',
+      'tests/fixtures/*.mjs',
+      'apps/*/test-fixtures/*.mjs',
+      'packages/database/prisma/*.mjs',
+    ],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: { globals: { process: 'readonly', console: 'readonly' } },
   },

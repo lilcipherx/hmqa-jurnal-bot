@@ -3,7 +3,6 @@ import { PageHeader } from '../../../components/page-header';
 import { ResourceTable } from '../../../components/resource-table';
 import { EmployeeInviteForm } from '../../../components/employee-invite-form';
 import { EmployeeStatusButton } from '../../../components/employee-status-button';
-import { EmployeeAccessForms } from '../../../components/employee-access-form';
 import { EmployeeTotpResetButton } from '../../../components/employee-totp-reset-button';
 import { adminFetch, type CurrentEmployee } from '../../../lib/api';
 import { currentLocale } from '../../../lib/locale';
@@ -14,34 +13,21 @@ interface Employee {
   status: string;
   totpEnabled: boolean;
   roles: { role: { code: string } }[];
-  journalScopes: { journalId: string }[];
   createdAt: string;
+  lastLoginAt: string | null;
 }
 export default async function UsersPage() {
   const locale = await currentLocale();
-  const [data, journals, currentEmployee] = await Promise.all([
+  const [data, currentEmployee] = await Promise.all([
     adminFetch<{ items: Employee[] }>('/api/v1/admin/employees'),
-    adminFetch<{ items: { id: string; code: string }[] }>('/api/v1/admin/journals'),
     adminFetch<CurrentEmployee>('/api/v1/auth/me'),
   ]);
-  const managedRoles = [
-    'OPERATOR',
-    'EDITOR',
-    'REVIEWER',
-    'CHIEF_EDITOR',
-    'CONTENT_ADMIN',
-    'ADMIN',
-    'AUDITOR',
-  ] as const;
-  const roleLabels = Object.fromEntries(
-    managedRoles.map((role) => [
-      role,
-      translate(locale, `role.${role.toLowerCase()}` as TranslationKey),
-    ]),
-  );
   return (
     <>
-      <PageHeader title={translate(locale, 'admin.users.heading')} />
+      <PageHeader
+        title={translate(locale, 'admin.users.heading')}
+        description={translate(locale, 'admin.users.description')}
+      />
       <ResourceTable
         caption={translate(locale, 'admin.users.heading')}
         headers={[
@@ -49,29 +35,37 @@ export default async function UsersPage() {
           translate(locale, 'admin.table.email'),
           translate(locale, 'admin.table.role'),
           translate(locale, 'admin.table.status'),
+          translate(locale, 'admin.users.last_login'),
           translate(locale, 'admin.table.actions'),
         ]}
         empty={translate(locale, 'admin.table.empty')}
         rows={data.items.map((item) => [
           item.displayName,
           item.email,
-          item.roles
-            .map((entry) =>
-              translate(locale, `role.${entry.role.code.toLowerCase()}` as TranslationKey),
-            )
-            .join(', '),
+          translate(locale, 'role.admin'),
           <span className="badge">
             {translate(locale, `employee_status.${item.status.toLowerCase()}` as TranslationKey)}
           </span>,
+          item.lastLoginAt
+            ? new Date(item.lastLoginAt).toLocaleString(locale)
+            : translate(locale, 'common.not_specified'),
           <div className="table-actions">
-            <EmployeeStatusButton
-              id={item.id}
-              status={item.status}
-              labels={{
-                activate: translate(locale, 'admin.users.activate'),
-                suspend: translate(locale, 'admin.users.suspend'),
-              }}
-            />
+            {item.status !== 'INVITED' ? (
+              <EmployeeStatusButton
+                id={item.id}
+                status={item.status}
+                labels={{
+                  activate: translate(locale, 'admin.users.activate'),
+                  suspend: translate(locale, 'admin.users.suspend'),
+                  warning: translate(locale, 'admin.users.status_warning'),
+                  currentPassword: translate(locale, 'admin.security.current_password'),
+                  currentTotp: translate(locale, 'admin.security.current_totp'),
+                  confirm: translate(locale, 'admin.users.confirm_status'),
+                  continue: translate(locale, 'common.next'),
+                  cancel: translate(locale, 'common.cancel'),
+                }}
+              />
+            ) : null}
             {item.id !== currentEmployee.id ? (
               <EmployeeTotpResetButton
                 id={item.id}
@@ -92,30 +86,15 @@ export default async function UsersPage() {
         ])}
       />
       <EmployeeInviteForm
-        journals={journals.items}
-        roleLabels={roleLabels}
         labels={{
           heading: translate(locale, 'admin.invite.employee_heading'),
           name: translate(locale, 'admin.table.name'),
           email: translate(locale, 'admin.table.email'),
-          role: translate(locale, 'admin.table.role'),
-          journals: translate(locale, 'admin.table.journal'),
-          affiliation: translate(locale, 'admin.invite.affiliation'),
-          expertise: translate(locale, 'admin.invite.expertise'),
+          currentPassword: translate(locale, 'admin.security.current_password'),
+          currentTotp: translate(locale, 'admin.security.current_totp'),
+          confirm: translate(locale, 'admin.invite.confirm_admin'),
           invitation: translate(locale, 'admin.invite.link'),
           submit: translate(locale, 'admin.invite.send'),
-        }}
-      />
-      <EmployeeAccessForms
-        employees={data.items}
-        journals={journals.items}
-        roles={managedRoles}
-        roleLabels={roleLabels}
-        labels={{
-          heading: translate(locale, 'admin.users.access'),
-          roles: translate(locale, 'admin.table.role'),
-          journals: translate(locale, 'admin.table.journal'),
-          save: translate(locale, 'admin.action.save'),
         }}
       />
     </>

@@ -43,6 +43,21 @@ describe('i18n production gates', () => {
     expect(normalizeLocale('de')).toBe('uz-Latn');
   });
 
+  it('keeps the owner-approved welcome and first-start language selector exact', () => {
+    expect(translate('ru', 'start.choose_language')).toBe(
+      'Tilni tanlang / Выберите язык / Choose your language',
+    );
+    expect(translate('ru', 'start.welcome')).toBe(
+      '👋 Здравствуйте! Добро пожаловать в HMQA JURNAL BOT.\n\nЧерез бот вы можете подавать научные статьи в журналы Академии HMQA в электронном виде, знакомиться с журналами и требованиями к публикации, отвечать на запросы редакции и отслеживать ход рассмотрения своей статьи.\n\n📌 Основные возможности:\n📚 Журналы и требования к публикации\n📝 Подача новой статьи\n📂 Отслеживание отправленных статей\n🔄 Отправка доработанной версии\n🔔 Уведомления от редакции\n👤 Управление профилем автора\n\nВыберите нужный раздел 👇',
+    );
+    expect(translate('uz-Latn', 'start.welcome')).toBe(
+      "👋 Assalomu alaykum! HMQA JURNAL BOT'ga xush kelibsiz.\n\nUshbu bot orqali HMQA Akademiyasi jurnallariga ilmiy maqolalaringizni elektron tarzda yuborishingiz, jurnal va nashr talablari bilan tanishishingiz, tahririyat so‘rovlariga javob berishingiz hamda maqolangizning ko‘rib chiqilish holatini kuzatishingiz mumkin.\n\n📌 Asosiy imkoniyatlar:\n📚 Jurnallar va nashr talablari\n📝 Yangi maqola yuborish\n📂 Yuborilgan maqolalarni kuzatish\n🔄 Qayta ishlangan versiyani yuborish\n🔔 Tahririyat bildirishnomalarini olish\n👤 Muallif profilini boshqarish\n\nKerakli bo‘limni tanlang 👇",
+    );
+    expect(translate('en', 'start.welcome')).toBe(
+      '👋 Welcome to HMQA JURNAL BOT.\n\nThis bot allows you to submit research articles to HMQA Academy journals electronically, review journal and publication requirements, respond to editorial requests, and track the review status of your submissions.\n\n📌 Main features:\n📚 Journals and publication requirements\n📝 Submit a new article\n📂 Track submitted articles\n🔄 Submit a revised version\n🔔 Receive editorial notifications\n👤 Manage your author profile\n\nChoose an option below 👇',
+    );
+  });
+
   it('fails closed when required placeholders are missing', () => {
     expect(() => translate('en', 'error.system')).toThrow('correlation_id');
   });
@@ -66,7 +81,26 @@ describe('i18n production gates', () => {
       'requirements.ack',
       'submission.new_version',
       'help.summary',
+      'help.submit.label',
+      'help.submit.text',
+      'help.files.label',
+      'help.statuses.label',
+      'help.revision.label',
+      'help.contact.label',
+      'menu.contact',
+      'contact.heading',
+      'author.full_name',
+      'author.degree_select',
+      'author.title_select',
+      'degree.phd',
+      'degree.other',
+      'title.professor',
+      'title.other',
       'admin.auth.sign_in',
+      'admin.nav.telegram',
+      'admin.nav.administrators',
+      'admin.metric.new',
+      'admin.submissions.group.action',
       'admin.action.transition',
     ] as const satisfies readonly TranslationKey[];
     for (const locale of supportedLocales) {

@@ -4,22 +4,19 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { LogoutButton } from '../../components/logout-button';
+import { LanguageSwitcher } from '../../components/language-switcher';
 import { AdminApiError, adminFetch, type CurrentEmployee } from '../../lib/api';
 import { currentLocale } from '../../lib/locale';
 
 const navigation = [
-  ['/dashboard', 'admin.nav.dashboard', null],
-  ['/submissions', 'admin.nav.submissions', 'submission:read:journal'],
-  ['/reviews', 'admin.nav.my_reviews', 'review:read:assigned'],
-  ['/journals', 'admin.nav.journals', 'journal:read'],
-  ['/reviewers', 'admin.nav.reviewers', 'review:assign'],
-  ['/users', 'admin.nav.users', 'user:manage'],
-  ['/translations', 'admin.nav.translations', 'translation:configure'],
-  ['/reports', 'admin.nav.reports', 'export:create'],
-  ['/audit', 'admin.nav.audit', 'audit:read:journal|audit:read:all'],
-  ['/notifications', 'admin.nav.notification_ops', 'notification:replay|operations:read'],
-  ['/privacy', 'admin.nav.privacy', 'privacy:case:read'],
-  ['/settings', 'admin.nav.settings', 'operations:read'],
+  ['/dashboard', 'admin.nav.dashboard', null, '📊'],
+  ['/submissions', 'admin.nav.submissions', 'submission:read:journal', '📄'],
+  ['/journals', 'admin.nav.journals', 'journal:read', '📚'],
+  ['/reviewers', 'admin.nav.reviewers', 'review:assign', '👥'],
+  ['/telegram', 'admin.nav.telegram', 'translation:configure', '🤖'],
+  ['/notifications', 'admin.nav.notification_ops', 'notification:replay|operations:read', '🔔'],
+  ['/users', 'admin.nav.administrators', 'user:manage', '👤'],
+  ['/settings', 'admin.nav.settings', 'operations:read', '⚙️'],
 ] as const;
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
@@ -46,9 +43,11 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         <nav className="nav" aria-label={translate(locale, 'admin.product_name')}>
           {navigation
             .filter(([, , permission]) => allowed(permission))
-            .map(([href, key]) => (
+            .map(([href, key, , icon]) => (
               <Link href={href as Route} key={href}>
-                <span className="mark" aria-hidden="true" />
+                <span className="nav-icon" aria-hidden="true">
+                  {icon}
+                </span>
                 {translate(locale, key as TranslationKey)}
               </Link>
             ))}
@@ -64,15 +63,10 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       </aside>
       <div className="content">
         <header className="topbar">
-          <a href="/api/locale?locale=uz-Latn&return=/dashboard" hrefLang="uz-Latn">
-            UZ
-          </a>
-          <a href="/api/locale?locale=ru&return=/dashboard" hrefLang="ru">
-            RU
-          </a>
-          <a href="/api/locale?locale=en&return=/dashboard" hrefLang="en">
-            EN
-          </a>
+          <LanguageSwitcher
+            currentLocale={locale}
+            label={translate(locale, 'admin.locale.selector')}
+          />
           <LogoutButton label={translate(locale, 'admin.auth.sign_out')} />
         </header>
         <main id="main" className="page">

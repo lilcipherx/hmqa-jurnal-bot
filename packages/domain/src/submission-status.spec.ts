@@ -24,34 +24,10 @@ function actorFor(target: SubmissionStatus): ScopedActor {
   if (target === 'SUBMITTED' || target === 'REVISION_SUBMITTED' || target === 'WITHDRAWN') {
     return author;
   }
-  if (['TECHNICAL_REVIEW', 'NEEDS_CORRECTION', 'REGISTERED'].includes(target)) {
-    return {
-      id: 'operator-1',
-      role: 'OPERATOR',
-      journalIds: new Set([journalId]),
-      stepUpVerified: true,
-    };
-  }
-  if (['EDITORIAL_REVIEW', 'UNDER_REVIEW', 'REVISION_REQUESTED'].includes(target)) {
-    return {
-      id: 'editor-1',
-      role: 'EDITOR',
-      journalIds: new Set([journalId]),
-      stepUpVerified: true,
-    };
-  }
-  if (target === 'ARCHIVED') {
-    return {
-      id: 'admin-1',
-      role: 'ADMIN',
-      journalIds: new Set<string>(),
-      stepUpVerified: true,
-    };
-  }
   return {
-    id: 'chief-1',
-    role: 'CHIEF_EDITOR',
-    journalIds: new Set([journalId]),
+    id: 'admin-1',
+    role: 'ADMIN',
+    journalIds: new Set<string>(),
     stepUpVerified: true,
   };
 }
@@ -110,18 +86,13 @@ describe('submission workflow', () => {
     });
   }
 
-  it('checks backend permissions for every whitelisted transition', () => {
-    const unprivilegedReviewer: ScopedActor = {
-      id: 'reviewer-1',
-      role: 'REVIEWER',
-      journalIds: new Set([journalId]),
-      stepUpVerified: true,
-    };
+  it('checks backend permissions for every staff-only whitelisted transition', () => {
     for (const from of submissionStatuses) {
       for (const to of allowedTransitions[from]) {
-        expect(() =>
-          assertTransitionAllowed(from, to, unprivilegedReviewer, completeContext()),
-        ).toThrowError(TransitionDeniedError);
+        if (to === 'SUBMITTED' || to === 'REVISION_SUBMITTED' || to === 'WITHDRAWN') continue;
+        expect(() => assertTransitionAllowed(from, to, author, completeContext())).toThrowError(
+          TransitionDeniedError,
+        );
       }
     }
   });
@@ -183,20 +154,20 @@ describe('submission workflow', () => {
   });
 
   it('requires a different step-up actor for four-eyes acceptance', () => {
-    const chief = {
-      id: 'chief-1',
-      role: 'CHIEF_EDITOR' as const,
-      journalIds: new Set(['journal-1']),
+    const admin = {
+      id: 'admin-1',
+      role: 'ADMIN' as const,
+      journalIds: new Set<string>(),
       stepUpVerified: true,
     };
     try {
-      assertTransitionAllowed('UNDER_REVIEW', 'ACCEPTED', chief, {
+      assertTransitionAllowed('UNDER_REVIEW', 'ACCEPTED', admin, {
         journalId: 'journal-1',
         ownerId: author.id,
         decisionBasis: 'reviews-complete',
         publicReason: 'Approved by the editorial board',
         fourEyesRequired: true,
-        decisionPreparedBy: chief.id,
+        decisionPreparedBy: admin.id,
       });
       throw new Error('EXPECTED_TRANSITION_DENIAL');
     } catch (error) {
@@ -205,33 +176,33 @@ describe('submission workflow', () => {
     }
   });
 
-  it('never lets an editor execute an accept decision', () => {
-    const editor = {
-      id: 'editor-1',
-      role: 'EDITOR' as const,
-      journalIds: new Set(['journal-1']),
+  it('lets an administrator execute an accept decision when the guards pass', () => {
+    const admin = {
+      id: 'admin-1',
+      role: 'ADMIN' as const,
+      journalIds: new Set<string>(),
       stepUpVerified: true,
     };
     expect(() =>
-      assertTransitionAllowed('UNDER_REVIEW', 'ACCEPTED', editor, {
+      assertTransitionAllowed('UNDER_REVIEW', 'ACCEPTED', admin, {
         journalId: 'journal-1',
         ownerId: author.id,
         decisionBasis: 'reviewed',
         publicReason: 'Approved',
         fourEyesRequired: false,
       }),
-    ).toThrowError(new TransitionDeniedError('FORBIDDEN', ['submission:decision:approve']));
+    ).not.toThrow();
   });
 
   it('enforces completed reviews when the journal policy requires them', () => {
-    const chief = {
-      id: 'chief-1',
-      role: 'CHIEF_EDITOR' as const,
-      journalIds: new Set(['journal-1']),
+    const admin = {
+      id: 'admin-1',
+      role: 'ADMIN' as const,
+      journalIds: new Set<string>(),
       stepUpVerified: true,
     };
     expect(() =>
-      assertTransitionAllowed('UNDER_REVIEW', 'ACCEPTED', chief, {
+      assertTransitionAllowed('UNDER_REVIEW', 'ACCEPTED', admin, {
         journalId: 'journal-1',
         ownerId: author.id,
         decisionBasis: 'reviewed',

@@ -7,6 +7,7 @@ import { TransitionForm, transitionStatuses } from '../../../../components/trans
 import { DecisionForm } from '../../../../components/decision-form';
 import { AssignmentForms } from '../../../../components/assignment-forms';
 import { MessageForm } from '../../../../components/message-form';
+import { ReviewWorkspace } from '../../../../components/review-workspace';
 import { AdminApiError, adminFetch, type CurrentEmployee } from '../../../../lib/api';
 import { currentLocale } from '../../../../lib/locale';
 
@@ -17,6 +18,10 @@ interface SubmissionDetail {
   rowVersion: number;
   submittedAt: string;
   journal: { code: string; fourEyesRequired: boolean };
+  owner: {
+    username: string | null;
+    authorProfile: { fullName: string | null; firstName: string; lastName: string } | null;
+  };
   requirementVersion: { version: number; config: unknown };
   versions: {
     versionNo: number;
@@ -88,8 +93,9 @@ interface SubmissionDetail {
     id: string;
     status: string;
     deadline: string;
-    reviewer: { employee: { displayName: string } };
-    review: { recommendation: string } | null;
+    anonymizedFileId: string;
+    reviewer: { id: string; displayName: string };
+    review: { recommendation: string; submittedAt: string } | null;
   }[];
   messageThread: {
     messages: {
@@ -104,8 +110,8 @@ interface SubmissionDetail {
 }
 
 interface AssignmentOptions {
-  employees: { id: string; displayName: string; roles: string[] }[];
-  reviewers: { id: string; affiliation: string; employee: { displayName: string } }[];
+  employees: { id: string; displayName: string }[];
+  reviewers: { id: string; displayName: string; affiliation: string }[];
   files: { id: string; originalName: string }[];
 }
 
@@ -126,6 +132,23 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
     throw error;
   }
   const latest = data.versions[0];
+  const localizedTitle = (titles: unknown) => {
+    if (!titles || typeof titles !== 'object' || Array.isArray(titles)) return '';
+    const values = titles as Record<string, unknown>;
+    for (const key of [locale, 'ru', 'en', 'uz-Latn']) {
+      const title = values[key];
+      if (typeof title === 'string' && title.trim()) return title;
+    }
+    return '';
+  };
+  const articleTitle = localizedTitle(latest?.metadata?.titles);
+  const authorName =
+    data.owner.authorProfile?.fullName ||
+    [data.owner.authorProfile?.lastName, data.owner.authorProfile?.firstName]
+      .filter(Boolean)
+      .join(' ') ||
+    data.owner.username ||
+    translate(locale, 'common.not_specified');
   const requirementConfig = journalRequirementConfigSchema.safeParse(
     data.requirementVersion.config,
   );
@@ -202,9 +225,9 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
   return (
     <>
       <PageHeader
-        eyebrow={`${data.journal.code} · v${latest?.versionNo ?? 1}`}
-        title={data.publicId}
-        description={translate(locale, `status.${data.status.toLowerCase()}` as TranslationKey)}
+        eyebrow={`${data.publicId} · ${data.journal.code} · v${latest?.versionNo ?? 1}`}
+        title={articleTitle || data.publicId}
+        description={`${authorName} · ${new Date(data.submittedAt).toLocaleString(locale)}`}
       />
       <section className="metrics">
         <article className="metric">
@@ -212,6 +235,14 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
           <strong className="badge">
             {translate(locale, `status.${data.status.toLowerCase()}` as TranslationKey)}
           </strong>
+        </article>
+        <article className="metric">
+          <span>{translate(locale, 'admin.table.journal')}</span>
+          <strong>{data.journal.code}</strong>
+        </article>
+        <article className="metric">
+          <span>{translate(locale, 'admin.table.version')}</span>
+          <strong>v{latest?.versionNo ?? 1}</strong>
         </article>
         <article className="metric">
           <span>{translate(locale, 'admin.table.requirements')}</span>
@@ -291,6 +322,7 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
           translate(locale, 'admin.table.updated'),
           translate(locale, 'admin.table.status'),
           translate(locale, 'admin.table.actor'),
+          translate(locale, 'admin.form.public_reason'),
         ]}
         empty={translate(locale, 'admin.table.empty')}
         rows={data.statusHistory.map((item) => [
@@ -299,6 +331,7 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
           item.actorRole
             ? enumLabel('role', item.actorRole)
             : translate(locale, 'admin.actor.system'),
+          item.publicReason ?? '—',
         ])}
       />
       <ResourceTable
@@ -327,12 +360,54 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
         ]}
         empty={translate(locale, 'admin.table.empty')}
         rows={data.reviewAssignments.map((item) => [
-          item.reviewer.employee.displayName,
+          item.reviewer.displayName,
           enumLabel('assignment_status', item.status),
           new Date(item.deadline).toLocaleString(locale),
           item.review ? enumLabel('review_recommendation', item.review.recommendation) : '—',
         ])}
       />
+      {employee.permissions.includes('review:write:assigned') ? (
+        <ReviewWorkspace
+          items={data.reviewAssignments
+            .filter((item) => item.status !== 'CANCELLED')
+            .map((item) => ({
+              ...item,
+              submission: { publicId: data.publicId, status: data.status },
+            }))}
+          locale={locale}
+          statusLabels={Object.fromEntries(
+            ['PENDING', 'ACCEPTED', 'DECLINED', 'COMPLETED', 'CANCELLED'].map((status) => [
+              status,
+              translate(locale, `assignment_status.${status.toLowerCase()}` as TranslationKey),
+            ]),
+          )}
+          recommendationLabels={Object.fromEntries(
+            ['ACCEPT', 'MINOR_REVISION', 'MAJOR_REVISION', 'REJECT'].map((recommendation) => [
+              recommendation,
+              translate(
+                locale,
+                `review_recommendation.${recommendation.toLowerCase()}` as TranslationKey,
+              ),
+            ]),
+          )}
+          labels={{
+            deadline: translate(locale, 'admin.form.deadline'),
+            download: translate(locale, 'admin.reviews.download'),
+            acceptAssignment: translate(locale, 'admin.reviews.accept_assignment'),
+            declineAssignment: translate(locale, 'admin.reviews.decline_assignment'),
+            recommendation: translate(locale, 'admin.reviews.recommendation'),
+            accept: translate(locale, 'admin.decision.accept'),
+            minorRevision: translate(locale, 'admin.reviews.minor_revision'),
+            majorRevision: translate(locale, 'admin.reviews.major_revision'),
+            reject: translate(locale, 'admin.decision.reject'),
+            publicComments: translate(locale, 'admin.reviews.public_comments'),
+            confidentialComments: translate(locale, 'admin.reviews.confidential_comments'),
+            submit: translate(locale, 'admin.reviews.submit'),
+            submitted: translate(locale, 'admin.reviews.submitted'),
+            empty: translate(locale, 'admin.table.empty'),
+          }}
+        />
+      ) : null}
       <ResourceTable
         caption={translate(locale, 'admin.messages.heading')}
         headers={[
@@ -372,15 +447,9 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
           files={assignmentOptions.files}
           canAssignStaff={canAssignStaff}
           canAssignReviewers={canAssignReviewers}
-          roleLabels={Object.fromEntries(
-            ['OPERATOR', 'EDITOR', 'REVIEWER'].map((role) => [role, enumLabel('role', role)]),
-          )}
           labels={{
             staffHeading: translate(locale, 'admin.assignments.staff_heading'),
             reviewerHeading: translate(locale, 'admin.assignments.reviewer_heading'),
-            kind: translate(locale, 'admin.assignments.kind'),
-            operator: translate(locale, 'admin.assignments.operator'),
-            editor: translate(locale, 'admin.assignments.editor'),
             employee: translate(locale, 'admin.assignments.employee'),
             reviewer: translate(locale, 'admin.assignments.reviewer'),
             reason: translate(locale, 'admin.assignments.reason'),

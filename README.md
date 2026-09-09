@@ -9,12 +9,12 @@ The Markdown PRD is the product source of truth. Architectural decisions, source
 
 ## What is included
 
-- durable multilingual Telegram registration, consent, profile, journal catalog, submission/revision wizard, complete localized slash-command catalog, immutable file list/downloads, privacy requests, notifications, help, and contacts;
+- durable multilingual Telegram registration, consent, seven-field author profile, journal catalog and requirements, submission/revision wizard, immutable file list/downloads, notifications, useful Help, and configurable contacts;
 - PostgreSQL-backed drafts and immutable submission/file/requirements versions;
-- Fastify API with OpenAPI, opaque staff sessions, Argon2id, mandatory TOTP, CSRF, rate limits, RBAC, journal scopes, request IDs, and audit hash chaining;
+- Fastify API with OpenAPI, opaque administrator sessions, Argon2id, mandatory TOTP, CSRF, rate limits, single-role backend authorization, request IDs, and audit hash chaining;
 - private S3/MinIO file ingestion through isolated processing and evidence quarantine, DOCX/PDF signature/container validation, ClamAV, SHA-256, configurable rendered DOCX/PF-015 evidence, editorial anonymized derivatives, and short-lived owner/RBAC-authorized download URLs;
 - BullMQ outbox delivery with exponential retry, leases, deterministic job IDs, notification delivery receipts, localized immutable PDF submission receipts, dead-letter state, and controlled replay;
-- localized Next.js administration for journals, requirement versions, staff invitations, assignments, reviews, decisions, messages, translations, reports, audit, and operations;
+- localized Next.js administration for articles, journals and requirement versions, standalone reviewers, Telegram content/contacts, notifications, administrator invitations, and security settings, with audit/privacy retained as backend controls;
 - Docker Compose, migrations, synthetic seed data, Prometheus alerts, encrypted off-host backups, restore tooling, and CI gates.
 
 Authors use the standard Telegram chat interface for registration, language selection, profile management, journal requirements, durable drafts, coauthors and metadata, uploads, preview, submission, status tracking, revisions, notifications, help, and contacts. Editorial staff use a separate localized web application with mandatory backend authorization and 2FA. All user surfaces support `uz-Latn`, `ru`, and `en` through the centralized i18n package.
@@ -100,7 +100,7 @@ This command requires a working Docker Engine and Compose v2. It creates the iso
 
 ## CI and public-source safety
 
-CI runs on disposable Ubuntu 24.04 GitHub-hosted runners. It uses no production secrets, grants only read access to repository contents in the main workflow, disables persisted checkout credentials, pins third-party actions to commit SHA, and never uses `pull_request_target`. PostgreSQL and Redis integration tests and the full MinIO/ClamAV/LibreOffice Compose drill are mandatory gates; required suites fail on skipped or zero tests.
+CI runs on the registered UpCloud Ubuntu 24.04 X64 runner using `[self-hosted, Linux, X64]`. It uses no production secrets, grants only read access to repository contents in the main workflow, disables persisted checkout credentials, pins third-party actions to commit SHA, and never uses `pull_request_target`. Fork pull requests do not execute automatically on the persistent host. PostgreSQL/Redis integration and the full MinIO/ClamAV/LibreOffice Compose drill are mandatory for trusted candidate commits; required suites fail on skipped or zero tests.
 
 `pnpm security:public` checks forbidden tracked paths, all reachable Git blobs, high-confidence secret formats, non-reserved email domains, and plausible phone numbers. This complements dependency audit, the working-tree secret scan, CodeQL, and human review; it does not make public issue content an approved channel for vulnerability reports.
 

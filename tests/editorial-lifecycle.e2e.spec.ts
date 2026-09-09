@@ -49,18 +49,28 @@ async function transition(
 suite('end-to-end editorial and revision lifecycle', () => {
   beforeAll(async () => {
     const suffix = randomUUID().replaceAll('-', '').slice(0, 10).toUpperCase();
-    for (const roleCode of ['AUTHOR', 'OPERATOR', 'EDITOR', 'CHIEF_EDITOR', 'ADMIN'] as const) {
-      const role = await database!.role.findUniqueOrThrow({ where: { code: roleCode } });
+    const adminRole = await database!.role.findUniqueOrThrow({ where: { code: 'ADMIN' } });
+    for (const identity of [
+      'NON_ADMIN',
+      'ADMIN_INTAKE',
+      'ADMIN_EDITORIAL',
+      'ADMIN_DECISION',
+      'ADMIN_ARCHIVE',
+    ] as const) {
       const employee = await database!.employee.create({
         data: {
-          email: `${roleCode.toLowerCase()}-lifecycle-${randomUUID()}@example.invalid`,
-          displayName: `Lifecycle ${roleCode}`,
+          email: `${identity.toLowerCase()}-lifecycle-${randomUUID()}@example.invalid`,
+          displayName: `Lifecycle ${identity}`,
           status: 'ACTIVE',
         },
       });
-      await database!.employeeRole.create({ data: { employeeId: employee.id, roleId: role.id } });
-      const token = `lifecycle-${roleCode}-${randomUUID()}`;
-      const csrf = `lifecycle-csrf-${roleCode}-${randomUUID()}`;
+      if (identity !== 'NON_ADMIN') {
+        await database!.employeeRole.create({
+          data: { employeeId: employee.id, roleId: adminRole.id },
+        });
+      }
+      const token = `lifecycle-${identity}-${randomUUID()}`;
+      const csrf = `lifecycle-csrf-${identity}-${randomUUID()}`;
       await database!.staffSession.create({
         data: {
           employeeId: employee.id,
@@ -71,7 +81,7 @@ suite('end-to-end editorial and revision lifecycle', () => {
           expiresAt: new Date(Date.now() + 60 * 60_000),
         },
       });
-      staff.set(roleCode, { employeeId: employee.id, token, csrf });
+      staff.set(identity, { employeeId: employee.id, token, csrf });
     }
 
     telegramUserId = `4${Date.now()}`;
@@ -97,9 +107,9 @@ suite('end-to-end editorial and revision lifecycle', () => {
           organization: 'DEV/TEST ONLY — REQUIRES ACADEMY APPROVAL',
           position: 'Test author',
           degree: 'PhD',
-          country: 'Uzbekistan',
-          city: 'Tashkent',
-          orcid: '0000-0002-1825-0097',
+          fullName: 'Lifecycle Author',
+          degreeCode: 'PHD',
+          titleCode: 'NONE',
         },
       }),
       database!.consentRecord.create({
@@ -166,13 +176,6 @@ suite('end-to-end editorial and revision lifecycle', () => {
       where: { id: journalId },
       data: { currentRequirementId: requirementId },
     });
-    await database!.employeeJournalScope.createMany({
-      data: ['OPERATOR', 'EDITOR', 'CHIEF_EDITOR'].map((roleCode) => ({
-        employeeId: staff.get(roleCode)!.employeeId,
-        journalId,
-      })),
-    });
-
     const originalFile = await database!.fileAsset.create({
       data: {
         objectKey: `e2e/lifecycle/${suffix}/v1.docx`,
@@ -202,7 +205,7 @@ suite('end-to-end editorial and revision lifecycle', () => {
       data: {
         submissionId,
         versionNo: 1,
-        profileSnapshot: { firstName: 'Lifecycle', lastName: 'Author' },
+        profileSnapshot: { fullName: 'Lifecycle Author', degreeCode: 'PHD', titleCode: 'NONE' },
         declarations: { originalityConfirmed: true },
         submittedById: ownerId,
       },
@@ -213,7 +216,7 @@ suite('end-to-end editorial and revision lifecycle', () => {
           submissionVersionId: version.id,
           authorOrder: 1,
           isCorresponding: true,
-          dataSnapshot: { firstName: 'Lifecycle', lastName: 'Author' },
+          dataSnapshot: { fullName: 'Lifecycle Author', degreeCode: 'PHD', titleCode: 'NONE' },
         },
       }),
       database!.submissionMetadata.create({
@@ -251,25 +254,19 @@ suite('end-to-end editorial and revision lifecycle', () => {
       database!.assignment.create({
         data: {
           submissionId,
-          employeeId: staff.get('EDITOR')!.employeeId,
+          employeeId: staff.get('ADMIN_EDITORIAL')!.employeeId,
           journalId,
-          kind: 'EDITOR',
+          kind: 'ADMIN',
           status: 'ACCEPTED',
           reason: 'Lifecycle E2E',
-          assignedById: staff.get('CHIEF_EDITOR')!.employeeId,
+          assignedById: staff.get('ADMIN_DECISION')!.employeeId,
         },
       }),
     ]);
-    const reviewerEmployee = await database!.employee.create({
-      data: {
-        email: `reviewer-lifecycle-${randomUUID()}@example.invalid`,
-        displayName: 'Lifecycle reviewer',
-        status: 'ACTIVE',
-      },
-    });
     const reviewer = await database!.reviewerProfile.create({
       data: {
-        employeeId: reviewerEmployee.id,
+        displayName: 'Lifecycle reviewer',
+        email: `reviewer-lifecycle-${randomUUID()}@example.invalid`,
         expertise: ['DEV/TEST ONLY'],
         affiliation: 'DEV/TEST ONLY — REQUIRES ACADEMY APPROVAL',
       },
@@ -331,12 +328,12 @@ suite('end-to-end editorial and revision lifecycle', () => {
 
   it('runs intake, review, immutable revision, acceptance, copyediting, layout, and publication', async () => {
     const sequence = [
-      ['OPERATOR', 'TECHNICAL_REVIEW', {}],
-      ['OPERATOR', 'REGISTERED', {}],
-      ['EDITOR', 'EDITORIAL_REVIEW', {}],
-      ['EDITOR', 'UNDER_REVIEW', {}],
+      ['ADMIN_INTAKE', 'TECHNICAL_REVIEW', {}],
+      ['ADMIN_INTAKE', 'REGISTERED', {}],
+      ['ADMIN_EDITORIAL', 'EDITORIAL_REVIEW', {}],
+      ['ADMIN_EDITORIAL', 'UNDER_REVIEW', {}],
       [
-        'EDITOR',
+        'ADMIN_EDITORIAL',
         'REVISION_REQUESTED',
         {
           publicReason: 'Please provide a corrected version.',
@@ -429,16 +426,16 @@ suite('end-to-end editorial and revision lifecycle', () => {
     rowVersion += 1;
 
     for (const [role, status, additional] of [
-      ['EDITOR', 'UNDER_REVIEW', {}],
+      ['ADMIN_EDITORIAL', 'UNDER_REVIEW', {}],
       [
-        'CHIEF_EDITOR',
+        'ADMIN_DECISION',
         'ACCEPTED',
         { publicReason: 'Accepted after revision.', internalReason: 'Requirements satisfied.' },
       ],
-      ['CHIEF_EDITOR', 'COPYEDITING', {}],
-      ['CHIEF_EDITOR', 'LAYOUT', {}],
+      ['ADMIN_DECISION', 'COPYEDITING', {}],
+      ['ADMIN_DECISION', 'LAYOUT', {}],
       [
-        'CHIEF_EDITOR',
+        'ADMIN_DECISION',
         'PUBLISHED',
         { publicationReference: 'https://example.invalid/journal/published-lifecycle' },
       ],
@@ -492,12 +489,12 @@ suite('end-to-end editorial and revision lifecycle', () => {
         status: 'REGISTERED',
       },
     });
-    const denied = await transition('AUTHOR', forbidden.id, 0, 'ACCEPTED', {
+    const denied = await transition('NON_ADMIN', forbidden.id, 0, 'ACCEPTED', {
       publicReason: 'Self acceptance is forbidden.',
       internalReason: 'Forbidden path.',
     });
-    expect(denied.statusCode).toBe(409);
-    expect(denied.json()).toMatchObject({ code: 'INVALID_TRANSITION' });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json()).toMatchObject({ code: 'FORBIDDEN' });
     expect(await database!.statusHistory.count({ where: { submissionId: forbidden.id } })).toBe(0);
 
     const rejected = await database!.submission.create({
@@ -509,12 +506,12 @@ suite('end-to-end editorial and revision lifecycle', () => {
         status: 'EDITORIAL_REVIEW',
       },
     });
-    const reject = await transition('CHIEF_EDITOR', rejected.id, 0, 'REJECTED', {
+    const reject = await transition('ADMIN_DECISION', rejected.id, 0, 'REJECTED', {
       publicReason: 'Outside the journal scope.',
       internalReason: 'Editorial scope decision.',
     });
     expect(reject.statusCode, reject.body).toBe(200);
-    const archived = await transition('ADMIN', rejected.id, 1, 'ARCHIVED');
+    const archived = await transition('ADMIN_ARCHIVE', rejected.id, 1, 'ARCHIVED');
     expect(archived.statusCode, archived.body).toBe(200);
     expect(
       await database!.submission.findUniqueOrThrow({ where: { id: rejected.id } }),

@@ -10,17 +10,44 @@ export default async function SettingsPage() {
     adminFetch<Record<string, unknown>>('/api/v1/admin/settings/runtime'),
     adminFetch<CurrentEmployee>('/api/v1/auth/me'),
   ]);
+  const scalar = (value: unknown): string =>
+    typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+      ? String(value)
+      : '—';
+  const rows = [
+    ['admin.settings.timezone', scalar(data.timezone)],
+    ['admin.settings.default_locale', scalar(data.defaultLocale)],
+    [
+      'admin.settings.supported_locales',
+      Array.isArray(data.supportedLocales) ? data.supportedLocales.join(', ') : '—',
+    ],
+    [
+      'admin.settings.file_limit',
+      `${Math.round(Number(data.fileMaxBytes ?? 0) / 1024 / 1024)} MiB`,
+    ],
+    ['admin.settings.signed_url_ttl', `${scalar(data.signedUrlTtlSeconds)} s`],
+    [
+      'admin.settings.retention',
+      data.retentionEnabled === true
+        ? `${translate(locale, 'admin.settings.enabled')} · ${scalar(data.retentionDraftDays)} ${translate(locale, 'admin.settings.days')}`
+        : translate(locale, 'admin.settings.disabled'),
+    ],
+  ] as const;
   return (
     <>
-      <PageHeader title={translate(locale, 'admin.settings.heading')} />
+      <PageHeader
+        title={translate(locale, 'admin.settings.heading')}
+        description={translate(locale, 'admin.settings.description')}
+      />
+      <h2>{translate(locale, 'admin.settings.system')}</h2>
       <ResourceTable
-        caption={translate(locale, 'admin.settings.heading')}
-        headers={[translate(locale, 'admin.table.key'), translate(locale, 'common.details')]}
+        caption={translate(locale, 'admin.settings.system')}
+        headers={[
+          translate(locale, 'admin.settings.parameter'),
+          translate(locale, 'common.details'),
+        ]}
         empty={translate(locale, 'admin.table.empty')}
-        rows={Object.entries(data).map(([key, value]) => [
-          <span className="identifier">{key}</span>,
-          Array.isArray(value) ? value.join(', ') : String(value),
-        ])}
+        rows={rows.map(([key, value]) => [translate(locale, key), value])}
       />
       <SecuritySettings
         totpEnabled={employee.totpEnabled}

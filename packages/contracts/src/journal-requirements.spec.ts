@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { journalRequirementConfigSchema, orcidSchema } from './index.js';
+import { journalRequirementConfigSchema } from './index.js';
 
 const manuscript = {
   category: 'MANUSCRIPT',
@@ -91,12 +91,5 @@ describe('journal requirement file contract', () => {
         },
       }),
     ).toThrow();
-  });
-});
-
-describe('ORCID validation', () => {
-  it('checks the ISO 7064 checksum', () => {
-    expect(orcidSchema.safeParse('0000-0002-1825-0097').success).toBe(true);
-    expect(orcidSchema.safeParse('0000-0002-1825-0098').success).toBe(false);
   });
 });

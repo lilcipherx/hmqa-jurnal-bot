@@ -19,7 +19,7 @@ All normal login and enrollment paths re-check the employee and TOTP state insid
 
 ## Consequences
 
-- `ADMIN` and `CHIEF_EDITOR` accounts cannot remain operational without TOTP after a reset; the next successful password check must proceed through re-enrollment.
+- `ADMIN` accounts cannot remain operational without TOTP after a reset; the next successful password check must proceed through re-enrollment.
 - A reset intentionally signs the affected staff member out on every device.
 - Recovery still requires an administrator who can complete step-up authentication. Out-of-band recovery for loss of both password and all administrator authenticators remains an operations incident, not a weaker product endpoint.
 - The database stores short-lived enrollment records so service restarts do not lose the recovery flow.

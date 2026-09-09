@@ -100,6 +100,7 @@ enum Severity {
 }
 
 enum AssignmentKind {
+  ADMIN
   OPERATOR
   EDITOR
   REVIEWER
@@ -214,6 +215,11 @@ model AuthorProfile {
   position      String    @db.VarChar(200)
   degree        String?   @db.VarChar(200)
   academicTitle String?   @map("academic_title") @db.VarChar(200)
+  fullName      String?   @map("full_name") @db.VarChar(300)
+  degreeCode    String?   @map("degree_code") @db.VarChar(32)
+  degreeCustom  String?   @map("degree_custom") @db.VarChar(200)
+  titleCode     String?   @map("title_code") @db.VarChar(32)
+  titleCustom   String?   @map("title_custom") @db.VarChar(200)
   country       String?   @db.VarChar(100)
   city          String?   @db.VarChar(100)
   orcid         String?   @db.VarChar(19)
@@ -278,6 +284,7 @@ model Journal {
   assignments          Assignment[]
   scopes               EmployeeJournalScope[]
   auditLogs            AuditLog[]
+  contactProfile       ContactProfile?
 
   @@index([mode, active])
   @@map("journals")
@@ -738,17 +745,61 @@ model Assignment {
 }
 
 model ReviewerProfile {
-  id          String             @id @default(uuid()) @db.Uuid
-  employeeId  String             @unique @map("employee_id") @db.Uuid
-  expertise   Json
-  affiliation String             @db.VarChar(300)
-  active      Boolean            @default(true)
-  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
-  employee    Employee           @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  assignments ReviewAssignment[]
+  id               String             @id @default(uuid()) @db.Uuid
+  employeeId       String?            @unique @map("employee_id") @db.Uuid
+  legacyEmployeeId String?            @map("legacy_employee_id") @db.Uuid
+  displayName      String             @map("display_name") @db.VarChar(200)
+  email            String?            @db.Citext
+  phone            String?            @db.VarChar(32)
+  expertise        Json
+  affiliation      String             @db.VarChar(300)
+  active           Boolean            @default(true)
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  employee         Employee?          @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  assignments      ReviewAssignment[]
 
   @@map("reviewers")
+}
+
+model ContactProfile {
+  id            String                @id @default(uuid()) @db.Uuid
+  scopeKey      String                @unique @map("scope_key") @db.VarChar(100)
+  journalId     String?               @unique @map("journal_id") @db.Uuid
+  phone         String?               @db.VarChar(32)
+  email         String?               @db.Citext
+  telegram      String?               @db.VarChar(100)
+  createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  journal       Journal?              @relation(fields: [journalId], references: [id], onDelete: Restrict)
+  localizations ContactLocalization[]
+
+  @@map("contact_profiles")
+}
+
+model ContactLocalization {
+  id               String         @id @default(uuid()) @db.Uuid
+  contactProfileId String         @map("contact_profile_id") @db.Uuid
+  locale           Locale
+  address          String?
+  workingHours     String?        @map("working_hours")
+  note             String?
+  contactProfile   ContactProfile @relation(fields: [contactProfileId], references: [id], onDelete: Restrict)
+
+  @@unique([contactProfileId, locale])
+  @@map("contact_localizations")
+}
+
+model BotContent {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @db.VarChar(100)
+  locale    Locale
+  content   String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([key, locale])
+  @@map("bot_content")
 }
 
 model ReviewAssignment {

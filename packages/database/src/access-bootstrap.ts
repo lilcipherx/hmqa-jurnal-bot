@@ -9,7 +9,7 @@ export async function seedSystemAccess(database: DatabaseClient): Promise<void> 
       create: { code, description: code },
     });
   }
-  for (const code of roles) {
+  for (const code of roles.filter((candidate) => candidate === 'ADMIN')) {
     const role = await database.role.upsert({
       where: { code },
       update: { description: code, system: true },

@@ -6,9 +6,11 @@ import { localizedResponseError } from '../lib/client-error';
 interface ReviewerRecord {
   id: string;
   active: boolean;
+  displayName: string;
+  email: string | null;
+  phone: string | null;
   affiliation: string;
   expertise: unknown;
-  employee: { displayName: string };
 }
 
 export function ReviewerManager({
@@ -21,9 +23,9 @@ export function ReviewerManager({
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
 
-  async function save(event: FormEvent<HTMLFormElement>, id: string) {
+  async function save(event: FormEvent<HTMLFormElement>, id?: string) {
     event.preventDefault();
-    setBusy(id);
+    setBusy(id ?? 'new');
     setError('');
     const form = new FormData(event.currentTarget);
     const rawExpertise = form.get('expertise');
@@ -32,10 +34,13 @@ export function ReviewerManager({
       .split(',')
       .map((item) => item.trim())
       .filter(Boolean);
-    const response = await fetch(`/api/reviewers/${id}`, {
-      method: 'PATCH',
+    const response = await fetch(id ? `/api/reviewers/${id}` : '/api/reviewers', {
+      method: id ? 'PATCH' : 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        displayName: form.get('displayName'),
+        email: form.get('email') || (id ? null : undefined),
+        phone: form.get('phone') || (id ? null : undefined),
         affiliation: typeof rawAffiliation === 'string' ? rawAffiliation : '',
         expertise,
         active: form.get('active') === 'on',
@@ -51,14 +56,53 @@ export function ReviewerManager({
   return (
     <section className="form-stack">
       <h2>{labels.heading}</h2>
+      <form className="panel form-stack" onSubmit={(event) => void save(event)}>
+        <h3>{labels.create}</h3>
+        <label className="field">
+          {labels.name}
+          <input name="displayName" required minLength={2} maxLength={200} />
+        </label>
+        <label className="field">
+          {labels.email}
+          <input name="email" type="email" />
+        </label>
+        <label className="field">
+          {labels.phone}
+          <input name="phone" type="tel" />
+        </label>
+        <label className="field">
+          {labels.affiliation}
+          <input name="affiliation" required maxLength={300} />
+        </label>
+        <label className="field">
+          {labels.expertise}
+          <input name="expertise" />
+        </label>
+        <input name="active" type="hidden" value="on" />
+        <button className="button" disabled={Boolean(busy)}>
+          {labels.add}
+        </button>
+      </form>
       {reviewers.map((reviewer) => (
         <details className="panel" key={reviewer.id}>
-          <summary>{reviewer.employee.displayName}</summary>
+          <summary>{reviewer.displayName}</summary>
           <form
             className="form-stack"
             onSubmit={(event) => void save(event, reviewer.id)}
             aria-busy={busy === reviewer.id}
           >
+            <label className="field">
+              {labels.name}
+              <input name="displayName" defaultValue={reviewer.displayName} required />
+            </label>
+            <label className="field">
+              {labels.email}
+              <input name="email" type="email" defaultValue={reviewer.email ?? ''} />
+            </label>
+            <label className="field">
+              {labels.phone}
+              <input name="phone" type="tel" defaultValue={reviewer.phone ?? ''} />
+            </label>
             <label className="field">
               {labels.affiliation}
               <input

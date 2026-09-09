@@ -30,7 +30,7 @@ Telegram file -> isolated processing -> signature/MIME -> ClamAV -> private clea
 
 - UUID primary keys; immutable server-generated public ID `HMQA-{JOURNAL}-{YEAR}-{SEQUENCE}`.
 - Submitted versions, requirements versions, status history, audit events, notification template snapshots, and file assets are append-only application records.
-- A workflow transition uses a serializable transaction and optimistic row version, checks actor permission, journal scope, target guard, and four-eyes state, then writes status, history, audit, and outbox atomically.
+- A workflow transition uses a serializable transaction and optimistic row version, checks administrator permission, target guards, and four-eyes identity separation, then writes status, history, audit, and outbox atomically.
 - Telegram `update_id` and notification event IDs have unique constraints; mutations use optimistic versions. Claimed webhook/outbox work has a stale-lease recovery path.
 - Signed object URLs are short-lived and permission-checked at issuance. Original object keys contain no PII.
 - Every submitted version atomically creates a localized receipt snapshot/outbox row. A document worker renders it with an embedded Unicode font to a content-addressed private S3 object; repeat submission and download remain owner-bound and audited.
@@ -40,7 +40,7 @@ Telegram file -> isolated processing -> signature/MIME -> ClamAV -> private clea
 - Staff passwords use Argon2id. TOTP is mandatory for local production accounts; recovery/reset is separately audited.
 - Admin sessions are opaque, hashed in PostgreSQL, rotated after authentication/step-up, and sent only as Secure HttpOnly SameSite cookies.
 - State-changing browser requests require same-origin checks plus CSRF tokens. Nginx and Fastify apply body, upload, and rate limits and security headers.
-- RBAC combines role permissions, journal scope, ownership/assignment, current status, and optional step-up/four-eyes guards.
+- Telegram identities are authors. Admin Panel identities have the single `ADMIN` role with full product access; backend checks still enforce authentication, current status, assignment/ownership where relevant, workflow guards, and optional step-up/four-eyes identity separation. Reviewers are standalone non-login domain records.
 - Logs are allowlisted structured events. Tokens, cookies, file bodies, manuscript text, full email/phone, and arbitrary payloads are redacted.
 
 ## File design

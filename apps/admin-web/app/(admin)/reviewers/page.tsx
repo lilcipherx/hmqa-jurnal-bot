@@ -1,4 +1,4 @@
-import { translate, type TranslationKey } from '@hmqa/i18n';
+import { translate } from '@hmqa/i18n';
 import { PageHeader } from '../../../components/page-header';
 import { ResourceTable } from '../../../components/resource-table';
 import { ReviewerManager } from '../../../components/reviewer-manager';
@@ -7,9 +7,11 @@ import { currentLocale } from '../../../lib/locale';
 interface Reviewer {
   id: string;
   active: boolean;
+  displayName: string;
+  email: string | null;
+  phone: string | null;
   affiliation: string;
   expertise: unknown;
-  employee: { displayName: string; email: string; status: string };
   _count: { assignments: number };
 }
 export default async function ReviewersPage() {
@@ -17,7 +19,10 @@ export default async function ReviewersPage() {
   const data = await adminFetch<{ items: Reviewer[] }>('/api/v1/admin/reviewers');
   return (
     <>
-      <PageHeader title={translate(locale, 'admin.reviewers.heading')} />
+      <PageHeader
+        title={translate(locale, 'admin.reviewers.heading')}
+        description={translate(locale, 'admin.reviewers.description')}
+      />
       <ResourceTable
         caption={translate(locale, 'admin.reviewers.heading')}
         headers={[
@@ -28,13 +33,12 @@ export default async function ReviewersPage() {
         ]}
         empty={translate(locale, 'admin.table.empty')}
         rows={data.items.map((item) => [
-          item.employee.displayName,
-          item.employee.email,
+          item.displayName,
+          item.email ?? item.phone ?? translate(locale, 'common.not_specified'),
           <span className="badge">
-            {translate(
-              locale,
-              `employee_status.${item.employee.status.toLowerCase()}` as TranslationKey,
-            )}
+            {item.active
+              ? translate(locale, 'admin.reviewers.active')
+              : translate(locale, 'employee_status.disabled')}
           </span>,
           item._count.assignments.toLocaleString(locale),
         ])}
@@ -43,6 +47,11 @@ export default async function ReviewersPage() {
         reviewers={data.items}
         labels={{
           heading: translate(locale, 'admin.reviewers.edit'),
+          create: translate(locale, 'admin.reviewers.create'),
+          add: translate(locale, 'admin.reviewers.add'),
+          name: translate(locale, 'admin.table.name'),
+          email: translate(locale, 'admin.table.email'),
+          phone: translate(locale, 'contact.phone'),
           affiliation: translate(locale, 'admin.invite.affiliation'),
           expertise: translate(locale, 'admin.invite.expertise'),
           active: translate(locale, 'admin.reviewers.active'),

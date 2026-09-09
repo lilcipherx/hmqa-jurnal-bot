@@ -14,7 +14,8 @@ concurrency:
 
 jobs:
   quality:
-    runs-on: ubuntu-24.04
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -41,7 +42,8 @@ jobs:
       - run: pnpm audit --audit-level moderate
 
   integration:
-    runs-on: ubuntu-24.04
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
     services:
       postgres:
@@ -50,7 +52,7 @@ jobs:
           POSTGRES_DB: hmqa_test
           POSTGRES_USER: hmqa
           POSTGRES_PASSWORD: integration-only-password
-        ports: [5432:5432]
+        ports: [5432/tcp]
         options: >-
           --health-cmd "pg_isready -U hmqa -d hmqa_test"
           --health-interval 5s
@@ -58,7 +60,7 @@ jobs:
           --health-retries 20
       redis:
         image: redis:8.2.1-alpine
-        ports: [6379:6379]
+        ports: [6379/tcp]
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s
@@ -66,8 +68,8 @@ jobs:
           --health-retries 20
     env:
       NODE_ENV: test
-      DATABASE_URL: postgresql://hmqa:integration-only-password@127.0.0.1:5432/hmqa_test?schema=public
-      REDIS_URL: redis://127.0.0.1:6379/15
+      DATABASE_URL: postgresql://hmqa:integration-only-password@127.0.0.1:${{ job.services.postgres.ports[5432] }}/hmqa_test?schema=public
+      REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports[6379] }}/15
       REQUIRE_RUNTIME_TESTS: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -87,6 +89,8 @@ jobs:
         run: |
           pnpm --filter @hmqa/database exec prisma migrate status
           pnpm --filter @hmqa/database exec prisma migrate diff --exit-code --from-schema prisma/schema.prisma --to-config-datasource
+      - name: Verify legacy product-model upgrade migration
+        run: pnpm db:migrate:upgrade-test
       - name: Verify idempotent development seed
         env:
           SEED_ADMIN_EMAIL: ci-admin@example.invalid
@@ -105,7 +109,8 @@ jobs:
           if-no-files-found: warn
 
   runtime:
-    runs-on: ubuntu-24.04
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 90
     env:
       HMQA_RUNTIME_PROJECT: hmqa-verification-${{ github.run_id }}-${{ github.run_attempt }}
@@ -134,9 +139,9 @@ jobs:
           include-hidden-files: true
 
   required:
-    if: always()
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     needs: [quality, integration, runtime]
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Enforce all required jobs
         env:

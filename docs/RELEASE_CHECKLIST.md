@@ -17,10 +17,10 @@ Record date, candidate Git SHA/image digests, operator, environment, and links t
 - [x] live/readiness probes passed with real PostgreSQL, Redis, private MinIO S3, ClamAV and LibreOffice;
 - [x] Telegram secret-webhook rejection, invalid update and duplicate-update/lease behavior passed against the complete stack;
 - [x] clean and EICAR/mismatched/oversized upload, immutable revision, outbox and localized surfaces passed automated verification;
-- [x] TOTP/lockout/CSRF, journal-scope IDOR, reviewer isolation and four-eyes decision passed real integration/E2E verification;
+- [ ] TOTP/lockout/CSRF, ADMIN-only authorization, standalone-reviewer isolation, and four-eyes identity separation pass real integration/E2E verification on the candidate SHA;
 - [x] structured logs, request correlation IDs, dependency-aware readiness, queue retry/DLQ/restart and alert configuration passed automated verification;
 - [ ] real Telegram/BotFather three-locale author restart/resume and notification-delivery smoke is signed off;
-- [ ] Academy staff completes browser UAT, including invitation, signed-URL expiry, translations, reports and audit workflows;
+- [ ] Academy administrator completes browser UAT, including login persistence, invitation, 2FA management, exact navigation, language persistence, journals, reviewers, Telegram contacts, notifications, and protected-page navigation;
 - [ ] operations validates deployed metrics/dashboards, fires a controlled alert and records a real error-tracking event.
 
 The required suites must report zero skipped tests. A missing `DATABASE_URL`, `REDIS_URL`, S3, ClamAV, or LibreOffice dependency is a failed release gate, not an accepted skip.

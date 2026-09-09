@@ -93,12 +93,11 @@ a {
   background: #1b392b;
   color: white;
 }
-.nav .mark {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.55;
+.nav-icon {
+  width: 1.25rem;
+  display: inline-grid;
+  place-items: center;
+  filter: grayscale(0.35);
 }
 .session {
   margin-top: auto;
@@ -129,6 +128,85 @@ a {
   place-items: center;
   text-decoration: none;
   border-radius: 0.5rem;
+}
+.language-switcher {
+  display: flex;
+  gap: 0.25rem;
+}
+.language-switcher a[aria-current='page'] {
+  background: var(--accent);
+  color: white;
+  font-weight: 700;
+}
+.filter-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 1rem 0 1.5rem;
+}
+.filter-tabs a {
+  padding: 0.55rem 0.8rem;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border);
+  text-decoration: none;
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+.filter-tabs a.active {
+  background: var(--accent);
+  color: white;
+}
+.section-block {
+  margin-top: 2rem;
+}
+.localized-fields {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  border: 1px solid var(--divider);
+  border-radius: 0.7rem;
+}
+.requirement-history {
+  display: grid;
+  gap: 0.85rem;
+  grid-column: 1 / -1;
+}
+.requirement-version,
+.requirement-editor-shell {
+  border: 1px solid var(--divider);
+  border-radius: 0.75rem;
+  padding: 0.8rem;
+}
+.requirement-version > summary,
+.requirement-editor-shell > summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+.requirement-version-content,
+.requirement-editor {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.requirement-editor {
+  max-width: none;
+}
+.requirement-note {
+  margin: 0;
+}
+.requirement-preview p {
+  margin: 0;
+}
+.requirement-policy-summary {
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+.pre-wrap {
+  white-space: pre-wrap;
+}
+textarea {
+  min-height: 7rem;
+  resize: vertical;
 }
 .page {
   padding: clamp(1.25rem, 4vw, 3rem);
@@ -275,6 +353,13 @@ td {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
   gap: 1rem;
   align-items: start;
+}
+.full-width,
+.journal-create-form {
+  grid-column: 1 / -1;
+}
+.journal-create-form {
+  max-width: 64rem;
 }
 .button-row {
   display: flex;

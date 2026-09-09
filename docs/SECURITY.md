@@ -11,7 +11,7 @@ Sensitive fields include author contact data, manuscripts, review identities/com
 - Argon2id passwords, mandatory TOTP enrollment, brute-force lockout, opaque hashed sessions, idle/absolute expiry, Secure HttpOnly SameSite cookies, and short decision step-up;
 - step-up-protected staff password changes and TOTP resets; a reset atomically removes the old encrypted seed, revokes every active session and pending challenge, audits only non-secret state, and forces a short-lived persistent re-enrollment flow before access is restored;
 - CSRF token plus exact-origin validation for every browser mutation; restrictive CORS, CSP, security headers, body limits, and API/nginx rate limiting;
-- compile-time role/permission matrix plus journal scope, assignment/ownership, workflow guard, optimistic concurrency, and four-eyes checks on the backend;
+- compile-time `AUTHOR`/`ADMIN` permission matrix plus assignment/ownership, workflow guards, optimistic concurrency, and four-eyes identity checks on the backend;
 - Telegram webhook secret checked in constant time, update envelope validated before grammY dispatch, and update IDs held with recoverable idempotency leases;
 - requirement-version-bound category/format/size limits, declared-MIME versus detected-signature comparison, magic MIME, DOCX ZIP structure/bomb/encryption/macro checks, passive-PDF action checks, SHA-256, ClamAV fail-closed behavior (including a distinct retryable timeout state), path/header-safe untrusted filenames, immutable object keys, separate private clean/quarantine buckets, SSE, and ownership/RBAC-checked expiring downloads;
 - resource-limited headless DOCX rendering, non-leaking formatting evidence, and journal-scoped editorial reviewer-package upload with attestation plus PF-015 identifier-class detection;
@@ -20,7 +20,7 @@ Sensitive fields include author contact data, manuscripts, review identities/com
 - notification claim leases, deterministic queue IDs, exponential retry, terminal dead-letter state, and audited replay generations;
 - password-authenticated Redis on the private backend network, with the credential supplied independently from the application connection URL;
 - Sentry configured without default PII, Prometheus metrics, health probes, alerts, secret scanning, dependency audit, SHA-pinned CI actions, and CodeQL. The AWS SDK packages are kept in lockstep; the 2026 `fast-xml-parser` transitive advisories are removed from the locked graph and the moderate-level audit passes.
-- public-source history scanning covers forbidden paths and every reachable Git blob; CI executes untrusted fork code only on disposable hosted runners with read-only repository permissions and no production secrets.
+- public-source history scanning covers forbidden paths and every reachable Git blob; CI uses the labelled UpCloud self-hosted X64 runner with minimal permissions and no production secrets, and untrusted fork code is not executed automatically on that persistent host.
 
 ## Secret rotation
 

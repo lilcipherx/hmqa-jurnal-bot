@@ -99,16 +99,13 @@ const userStateSchema = z.object({
   activeDraft: draftSchema.nullable(),
   profile: z
     .object({
-      firstName: z.string(),
-      lastName: z.string(),
-      middleName: z.string().nullable(),
+      fullName: z.string(),
       organization: z.string(),
       position: z.string(),
-      degree: z.string().nullable(),
-      academicTitle: z.string().nullable(),
-      country: z.string().nullable(),
-      city: z.string().nullable(),
-      orcid: z.string().nullable(),
+      degreeCode: z.string(),
+      degreeCustom: z.string().nullable(),
+      titleCode: z.string(),
+      titleCustom: z.string().nullable(),
       email: z.string(),
       phone: z.string(),
       updatedAt: z.coerce.date(),
@@ -129,8 +126,24 @@ const journalSchema = z.object({
       version: z.number(),
       effectiveAt: z.coerce.date().nullable(),
       state: z.string(),
+      title: z.string(),
+      summary: z.string(),
+      body: z.string(),
+      help: z.string().nullable(),
     })
     .nullable(),
+});
+
+const telegramContentSchema = z.object({
+  contact: z.object({
+    phone: z.string().nullable(),
+    email: z.string().nullable(),
+    telegram: z.string().nullable(),
+    address: z.string().nullable(),
+    workingHours: z.string().nullable(),
+    note: z.string().nullable(),
+  }),
+  content: z.record(z.string(), z.string().nullable()),
 });
 
 const submissionSchema = z.object({
@@ -302,9 +315,17 @@ export class HmqaApiClient {
     });
   }
 
+  async getTelegramContent(locale: Locale, journalId?: string) {
+    const query = new URLSearchParams({ locale });
+    if (journalId) query.set('journalId', journalId);
+    return telegramContentSchema.parse(
+      await this.request(`/api/v1/internal/telegram/content?${query.toString()}`),
+    );
+  }
+
   async createProfileDraft(
     telegramUserId: string,
-    section: 'all' | 'name' | 'phone' | 'email' | 'work' | 'academic',
+    section: 'all' | 'name' | 'phone' | 'email' | 'organization' | 'position' | 'degree' | 'title',
   ): Promise<DraftState> {
     return draftSchema.parse(
       await this.request(`/api/v1/internal/telegram/users/${telegramUserId}/profile-draft`, {

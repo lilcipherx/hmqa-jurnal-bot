@@ -64,18 +64,6 @@ export const docxPreflightPolicySchema = z
   })
   .strict();
 
-export const orcidSchema = z
-  .string()
-  .regex(/^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/)
-  .refine((value) => {
-    const compact = value.replaceAll('-', '');
-    let total = 0;
-    for (const digit of compact.slice(0, 15)) total = (total + Number(digit)) * 2;
-    const remainder = total % 11;
-    const result = (12 - remainder) % 11;
-    return (result === 10 ? 'X' : String(result)) === compact[15];
-  }, 'invalid ORCID checksum');
-
 export const journalRequirementFilePolicySchema = z
   .object({
     category: z.string().regex(/^[A-Z][A-Z0-9_]{1,31}$/),
@@ -272,11 +260,26 @@ export const cursorPageSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 
+export const scientificDegreeCodes = [
+  'NONE',
+  'PHD',
+  'DSC',
+  'CANDIDATE_OF_SCIENCES',
+  'DOCTOR_OF_SCIENCES',
+  'OTHER',
+] as const;
+
+export const academicTitleCodes = [
+  'NONE',
+  'PROFESSOR',
+  'ASSOCIATE_PROFESSOR',
+  'SENIOR_RESEARCHER',
+  'OTHER',
+] as const;
+
 export const authorProfileSchema = z
   .object({
-    firstName: z.string().trim().min(2).max(100),
-    lastName: z.string().trim().min(2).max(100),
-    middleName: z.string().trim().max(100).nullable(),
+    fullName: z.string().trim().min(2).max(300),
     phone: z
       .string()
       .trim()
@@ -287,13 +290,16 @@ export const authorProfileSchema = z
     }),
     organization: z.string().trim().min(2).max(300),
     position: z.string().trim().min(2).max(200),
-    degree: z.string().trim().max(200).nullable(),
-    title: z.string().trim().max(200).nullable(),
-    orcid: z
-      .string()
-      .trim()
-      .regex(/^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/)
-      .nullable(),
+    degreeCode: z.enum(scientificDegreeCodes),
+    degreeCustom: z.string().trim().min(2).max(200).nullable(),
+    titleCode: z.enum(academicTitleCodes),
+    titleCustom: z.string().trim().min(2).max(200).nullable(),
+  })
+  .refine((value) => value.degreeCode !== 'OTHER' || value.degreeCustom, {
+    path: ['degreeCustom'],
+  })
+  .refine((value) => value.titleCode !== 'OTHER' || value.titleCustom, {
+    path: ['titleCustom'],
   })
   .strict();
 

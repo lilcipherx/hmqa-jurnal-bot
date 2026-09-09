@@ -20,6 +20,9 @@ importers:
       '@hmqa/database':
         specifier: workspace:*
         version: link:packages/database
+      '@hmqa/i18n':
+        specifier: workspace:*
+        version: link:packages/i18n
       '@hmqa/security':
         specifier: workspace:*
         version: link:packages/security

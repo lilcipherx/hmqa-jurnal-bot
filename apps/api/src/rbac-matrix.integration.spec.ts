@@ -1,8 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { loadConfig } from '@hmqa/config';
 import { createPrismaClient } from '@hmqa/database';
-import { hasPermission, roles, type Role } from '@hmqa/domain';
-import { hashOpaqueToken } from '@hmqa/security';
+import { permissions, permissionsFor } from '@hmqa/domain';
+import {
+  encryptSecret,
+  generateOpaqueToken,
+  generateTotpCode,
+  generateTotpSecret,
+  hashOpaqueToken,
+  hashPassword,
+} from '@hmqa/security';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
@@ -12,39 +19,112 @@ const redisUrl = process.env.REDIS_URL;
 const suite = databaseUrl && redisUrl ? describe : describe.skip;
 const database = databaseUrl ? createPrismaClient(databaseUrl) : null;
 const redis = redisUrl ? new Redis(redisUrl, { maxRetriesPerRequest: 2 }) : null;
-const sessions = new Map<Role, { employeeId: string; token: string; csrf: string }>();
-let app: Awaited<ReturnType<typeof createApp>>;
-let scopedSubmissionId = '';
-let foreignSubmissionId = '';
-let decisionSubmissionId = '';
+const encryptionKey = 'simplified-admin-rbac-integration-key';
+const password = 'Simplified-admin-integration-password-2026!';
+const serviceSecret = 'simplified-admin-service-secret';
 
-function headersFor(role: Role, csrf = false) {
-  const session = sessions.get(role)!;
+interface Identity {
+  employeeId: string;
+  token: string;
+  csrf: string;
+  secret: string;
+}
+
+let app: Awaited<ReturnType<typeof createApp>>;
+const admins: Identity[] = [];
+let nonAdminToken = '';
+let firstJournalId = '';
+let secondJournalId = '';
+let assignmentSubmissionId = '';
+
+function headers(identity: Identity, csrf = false) {
   return {
-    cookie: `hmqa_session=${session.token}`,
-    ...(csrf ? { origin: 'http://localhost:3000', 'x-csrf-token': session.csrf } : {}),
+    cookie: `hmqa_session=${identity.token}`,
+    ...(csrf ? { origin: 'http://localhost:3000', 'x-csrf-token': identity.csrf } : {}),
   };
 }
 
-suite('exhaustive backend RBAC boundaries', () => {
+function requirementConfig(maxBytes = 10 * 1024 * 1024) {
+  return {
+    requiredFiles: [
+      {
+        category: 'MANUSCRIPT',
+        labels: {
+          'uz-Latn': 'Asosiy maqola',
+          ru: 'Основная статья',
+          en: 'Main manuscript',
+        },
+        formats: ['docx'],
+        required: true,
+        preflightRequired: true,
+      },
+    ],
+    limits: { maxBytes, maxFiles: 10, maxTotalBytes: 50 * 1024 * 1024 },
+    metadata: {
+      abstractMinWords: 150,
+      abstractMaxWords: 300,
+      keywordMinCount: 5,
+      keywordMaxCount: 10,
+      coauthorMaxCount: 10,
+    },
+    preflight: { docx: { rulesVersion: 'admin-integration-v1', requiredMarkers: [] } },
+    workflow: {
+      reviewModel: 'NO_EXTERNAL_REVIEW',
+      requiredReviewerCount: 0,
+      decisionRequiresCompletedReviews: false,
+    },
+  };
+}
+
+function requirementLocalizations(prefix: string) {
+  return {
+    'uz-Latn': {
+      title: `${prefix} UZ`,
+      summary: `${prefix} UZ qisqacha`,
+      body: `${prefix} UZ to‘liq matn`,
+      help: `${prefix} UZ yordam`,
+      contact: `${prefix} UZ aloqa`,
+    },
+    ru: {
+      title: `${prefix} RU`,
+      summary: `${prefix} RU кратко`,
+      body: `${prefix} RU полный текст`,
+      help: `${prefix} RU помощь`,
+      contact: `${prefix} RU контакты`,
+    },
+    en: {
+      title: `${prefix} EN`,
+      summary: `${prefix} EN summary`,
+      body: `${prefix} EN full text`,
+      help: `${prefix} EN help`,
+      contact: `${prefix} EN contact`,
+    },
+  };
+}
+
+suite('simplified administrator authorization model', () => {
   beforeAll(async () => {
-    const suffix = randomUUID().replaceAll('-', '').slice(0, 8).toUpperCase();
-    for (const roleCode of roles) {
-      const role = await database!.role.upsert({
-        where: { code: roleCode },
-        update: {},
-        create: { code: roleCode, description: `Integration ${roleCode}` },
-      });
+    const adminRole = await database!.role.upsert({
+      where: { code: 'ADMIN' },
+      update: {},
+      create: { code: 'ADMIN', description: 'Administrator' },
+    });
+    const passwordHash = await hashPassword(password);
+    for (let index = 0; index < 2; index += 1) {
+      const secret = generateTotpSecret();
       const employee = await database!.employee.create({
         data: {
-          email: `${roleCode.toLowerCase()}-${randomUUID()}@example.invalid`,
-          displayName: `Integration ${roleCode}`,
+          email: `admin-${index}-${randomUUID()}@example.invalid`,
+          displayName: `Integration administrator ${index + 1}`,
+          passwordHash,
           status: 'ACTIVE',
+          totpEnabled: true,
+          totpSecretCipher: encryptSecret(secret, encryptionKey),
+          roles: { create: { roleId: adminRole.id } },
         },
       });
-      await database!.employeeRole.create({ data: { employeeId: employee.id, roleId: role.id } });
-      const token = `session-${roleCode}-${randomUUID()}`;
-      const csrf = `csrf-${roleCode}-${randomUUID()}`;
+      const token = generateOpaqueToken();
+      const csrf = generateOpaqueToken();
       await database!.staffSession.create({
         data: {
           employeeId: employee.id,
@@ -55,107 +135,58 @@ suite('exhaustive backend RBAC boundaries', () => {
           expiresAt: new Date(Date.now() + 60 * 60_000),
         },
       });
-      sessions.set(roleCode, { employeeId: employee.id, token, csrf });
+      admins.push({ employeeId: employee.id, token, csrf, secret });
     }
 
-    const [journalA, journalB, owner] = await Promise.all([
-      database!.journal.create({
-        data: { code: `RA${suffix}`, mode: 'NATIVE', active: true, fourEyesRequired: false },
-      }),
-      database!.journal.create({
-        data: { code: `RB${suffix}`, mode: 'NATIVE', active: true, fourEyesRequired: false },
-      }),
-      database!.user.create({
-        data: {
-          telegramUserId: BigInt(`6${Date.now()}`),
-          telegramChatId: BigInt(`6${Date.now()}`),
-          locale: 'ru',
-        },
-      }),
-    ]);
-    const requirementConfig = {
-      requiredFiles: [
-        {
-          category: 'MANUSCRIPT',
-          labels: { 'uz-Latn': 'Maqola', ru: 'Статья', en: 'Article' },
-          formats: ['docx'],
-          required: true,
-          preflightRequired: true,
-        },
-      ],
-      limits: { maxBytes: 1024 * 1024, maxFiles: 2, maxTotalBytes: 2 * 1024 * 1024 },
-      preflight: { docx: { rulesVersion: 'rbac-integration-v1', requiredMarkers: [] } },
-      workflow: {
-        reviewModel: 'NO_EXTERNAL_REVIEW',
-        requiredReviewerCount: 0,
-        decisionRequiresCompletedReviews: false,
+    const nonAdmin = await database!.employee.create({
+      data: {
+        email: `non-admin-${randomUUID()}@example.invalid`,
+        displayName: 'Non administrator',
+        status: 'ACTIVE',
       },
-    };
-    const [requirementA, requirementB] = await Promise.all([
-      database!.journalRequirementVersion.create({
-        data: {
-          journalId: journalA.id,
-          version: 1,
-          state: 'PUBLISHED',
-          config: requirementConfig,
-          configHash: 'a'.repeat(64),
-          changeNote: 'DEV/TEST ONLY — REQUIRES ACADEMY APPROVAL',
-          effectiveAt: new Date(),
-          publishedAt: new Date(),
-        },
-      }),
-      database!.journalRequirementVersion.create({
-        data: {
-          journalId: journalB.id,
-          version: 1,
-          state: 'PUBLISHED',
-          config: requirementConfig,
-          configHash: 'b'.repeat(64),
-          changeNote: 'DEV/TEST ONLY — REQUIRES ACADEMY APPROVAL',
-          effectiveAt: new Date(),
-          publishedAt: new Date(),
-        },
-      }),
-    ]);
-    const [scoped, foreign, decision] = await Promise.all([
-      database!.submission.create({
-        data: {
-          publicId: `RBAC-A-${suffix}`,
-          journalId: journalA.id,
-          ownerId: owner.id,
-          requirementVersionId: requirementA.id,
-          status: 'SUBMITTED',
-        },
-      }),
-      database!.submission.create({
-        data: {
-          publicId: `RBAC-B-${suffix}`,
-          journalId: journalB.id,
-          ownerId: owner.id,
-          requirementVersionId: requirementB.id,
-          status: 'SUBMITTED',
-        },
-      }),
-      database!.submission.create({
-        data: {
-          publicId: `RBAC-D-${suffix}`,
-          journalId: journalA.id,
-          ownerId: owner.id,
-          requirementVersionId: requirementA.id,
-          status: 'EDITORIAL_REVIEW',
-        },
-      }),
-    ]);
-    scopedSubmissionId = scoped.id;
-    foreignSubmissionId = foreign.id;
-    decisionSubmissionId = decision.id;
-
-    await database!.employeeJournalScope.createMany({
-      data: ['OPERATOR', 'EDITOR', 'CHIEF_EDITOR', 'CONTENT_ADMIN'].map((role) => ({
-        employeeId: sessions.get(role as Role)!.employeeId,
-        journalId: journalA.id,
-      })),
     });
+    nonAdminToken = generateOpaqueToken();
+    await database!.staffSession.create({
+      data: {
+        employeeId: nonAdmin.id,
+        tokenHash: hashOpaqueToken(nonAdminToken),
+        csrfHash: hashOpaqueToken(generateOpaqueToken()),
+        twoFactorAt: new Date(),
+        expiresAt: new Date(Date.now() + 60 * 60_000),
+      },
+    });
+
+    const suffix = randomUUID().replaceAll('-', '').slice(0, 8).toUpperCase();
+    const [first, second] = await Promise.all([
+      database!.journal.create({ data: { code: `SA${suffix}`, mode: 'NATIVE' } }),
+      database!.journal.create({ data: { code: `SB${suffix}`, mode: 'NATIVE' } }),
+    ]);
+    firstJournalId = first.id;
+    secondJournalId = second.id;
+
+    const requirement = await database!.journalRequirementVersion.create({
+      data: {
+        journalId: first.id,
+        version: 1,
+        state: 'PUBLISHED',
+        config: {},
+        configHash: randomUUID().replaceAll('-', '').padEnd(64, '0').slice(0, 64),
+        changeNote: 'Simplified administrator assignment integration fixture',
+        publishedAt: new Date(),
+      },
+    });
+    const author = await database!.user.create({
+      data: { telegramUserId: BigInt(`9${Date.now()}${Math.floor(Math.random() * 1000)}`) },
+    });
+    const submission = await database!.submission.create({
+      data: {
+        publicId: `HMQA-ASSIGN-${randomUUID()}`,
+        journalId: first.id,
+        ownerId: author.id,
+        requirementVersionId: requirement.id,
+      },
+    });
+    assignmentSubmissionId = submission.id;
 
     const config = loadConfig({
       NODE_ENV: 'test',
@@ -164,17 +195,17 @@ suite('exhaustive backend RBAC boundaries', () => {
       BOT_BASE_URL: 'http://localhost:3002',
       DATABASE_URL: databaseUrl!,
       REDIS_URL: redisUrl!,
-      TELEGRAM_BOT_TOKEN: '123456:integration-token',
-      TELEGRAM_WEBHOOK_SECRET: 'integration-webhook-secret',
-      PUBLIC_BOT_USERNAME: 'hmqa_test_bot',
+      TELEGRAM_BOT_TOKEN: '123456:simplified-admin-test-token',
+      TELEGRAM_WEBHOOK_SECRET: 'simplified-admin-webhook-secret',
+      PUBLIC_BOT_USERNAME: 'hmqa_simplified_admin_test_bot',
       S3_ENDPOINT: 'http://localhost:9000',
       S3_BUCKET: 'hmqa-test',
       S3_ACCESS_KEY: 'test-access',
       S3_SECRET_KEY: 'test-secret',
-      SERVICE_AUTH_SECRET: 'integration-service-secret',
-      SESSION_SECRET: 'integration-session-secret',
-      ENCRYPTION_KEY: 'integration-encryption-key',
-      METRICS_TOKEN: 'integration-metrics-token',
+      SERVICE_AUTH_SECRET: serviceSecret,
+      SESSION_SECRET: 'simplified-admin-session-secret',
+      ENCRYPTION_KEY: encryptionKey,
+      METRICS_TOKEN: 'simplified-admin-metrics-token',
     });
     app = await createApp({ config, database: database!, redis: redis! });
     await app.ready();
@@ -186,143 +217,500 @@ suite('exhaustive backend RBAC boundaries', () => {
     await database?.$disconnect();
   });
 
-  it('rejects missing and expired staff sessions', async () => {
-    const missing = await app.inject({ method: 'GET', url: '/api/v1/auth/me' });
-    expect(missing.statusCode).toBe(401);
-
-    const employee = await database!.employee.create({
-      data: {
-        email: `expired-${randomUUID()}@example.invalid`,
-        displayName: 'Expired session',
-        status: 'ACTIVE',
-      },
-    });
-    const expiredToken = `expired-${randomUUID()}`;
-    await database!.staffSession.create({
-      data: {
-        employeeId: employee.id,
-        tokenHash: hashOpaqueToken(expiredToken),
-        csrfHash: hashOpaqueToken(randomUUID()),
-        twoFactorAt: new Date(Date.now() - 120_000),
-        expiresAt: new Date(Date.now() - 60_000),
-      },
-    });
-    const expired = await app.inject({
-      method: 'GET',
-      url: '/api/v1/auth/me',
-      headers: { cookie: `hmqa_session=${expiredToken}` },
-    });
-    expect(expired.statusCode).toBe(401);
+  it('gives every administrator every product permission', () => {
+    expect([...permissionsFor('ADMIN')].sort()).toEqual([...permissions].sort());
   });
 
-  it('enforces the reviewed role-to-resource matrix through HTTP responses', async () => {
+  it('allows multiple administrators to use every main administration resource', async () => {
     const resources = [
-      '/api/v1/admin/submissions',
+      '/api/v1/admin/dashboard',
+      '/api/v1/admin/submissions?group=all',
       '/api/v1/admin/reviews/assigned',
+      '/api/v1/admin/journals',
+      '/api/v1/admin/reviewers',
+      '/api/v1/admin/telegram-content',
+      '/api/v1/admin/notifications',
       '/api/v1/admin/employees',
-      '/api/v1/admin/audit',
       '/api/v1/admin/reports/overview',
+      '/api/v1/admin/audit',
       '/api/v1/admin/settings/runtime',
-    ] as const;
-    const expected: Record<Role, readonly number[]> = {
-      AUTHOR: [403, 403, 403, 403, 403, 403],
-      OPERATOR: [200, 403, 403, 200, 403, 403],
-      EDITOR: [200, 403, 403, 200, 403, 403],
-      REVIEWER: [403, 200, 403, 403, 403, 403],
-      CHIEF_EDITOR: [200, 403, 403, 200, 200, 403],
-      CONTENT_ADMIN: [403, 403, 403, 200, 403, 403],
-      ADMIN: [403, 403, 200, 200, 403, 200],
-      AUDITOR: [403, 403, 403, 200, 200, 200],
-    };
-    for (const role of roles) {
-      for (const [index, resource] of resources.entries()) {
+    ];
+    for (const admin of admins) {
+      for (const resource of resources) {
         const response = await app.inject({
           method: 'GET',
           url: resource,
-          headers: headersFor(role),
+          headers: headers(admin),
         });
-        expect(response.statusCode, `${role}:${resource}`).toBe(expected[role][index]);
+        expect(response.statusCode, resource).toBe(200);
       }
-    }
-  });
-
-  it('serves the dashboard safely to staff roles without submission access', async () => {
-    for (const role of roles) {
-      const response = await app.inject({
+      const journals = await app.inject({
         method: 'GET',
-        url: '/api/v1/admin/dashboard',
-        headers: headersFor(role),
+        url: '/api/v1/admin/journals',
+        headers: headers(admin),
       });
-      expect(response.statusCode, role).toBe(200);
-      if (!hasPermission(role, 'submission:read:journal')) {
-        expect(response.json()).toMatchObject({
-          total: 0,
-          pendingTechnical: 0,
-          underReview: 0,
-          revisions: 0,
-          published: 0,
-        });
-      }
+      const ids = journals.json<{ items: { id: string }[] }>().items.map(({ id }) => id);
+      expect(ids).toEqual(expect.arrayContaining([firstJournalId, secondJournalId]));
     }
   });
 
-  it('prevents a journal-scoped operator from listing or reading another journal', async () => {
-    const list = await app.inject({
+  it('rejects an authenticated employee without the ADMIN membership', async () => {
+    const response = await app.inject({
       method: 'GET',
-      url: '/api/v1/admin/submissions',
-      headers: headersFor('OPERATOR'),
+      url: '/api/v1/auth/me',
+      headers: { cookie: `hmqa_session=${nonAdminToken}` },
     });
-    expect(list.statusCode).toBe(200);
-    expect(list.json<{ items: { id: string }[] }>().items).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: scopedSubmissionId })]),
-    );
-    expect(list.json<{ items: { id: string }[] }>().items).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: foreignSubmissionId })]),
-    );
-
-    const detail = await app.inject({
-      method: 'GET',
-      url: `/api/v1/admin/submissions/${foreignSubmissionId}`,
-      headers: headersFor('OPERATOR'),
-    });
-    expect(detail.statusCode).toBe(403);
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ code: 'FORBIDDEN' });
   });
 
-  it('denies reviewer assignment and final decisions to unprivileged roles', async () => {
-    const reviewerAssignment = await app.inject({
-      method: 'POST',
-      url: `/api/v1/admin/submissions/${scopedSubmissionId}/reviewer-assignments`,
-      headers: { ...headersFor('REVIEWER', true), 'content-type': 'application/json' },
-      payload: {},
+  it('exposes only ADMIN in the staff role catalog', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/roles',
+      headers: headers(admins[0]!),
     });
-    expect(reviewerAssignment.statusCode).toBe(403);
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ items: { code: string }[] }>().items.map(({ code }) => code)).toEqual([
+      'ADMIN',
+    ]);
+  });
 
-    const editorDecision = await app.inject({
+  it('lets an administrator create a localized journal and records the action', async () => {
+    const code = `UJ${randomUUID().replaceAll('-', '').slice(0, 8)}`.toUpperCase();
+    const response = await app.inject({
       method: 'POST',
-      url: `/api/v1/admin/submissions/${decisionSubmissionId}/transitions`,
-      headers: { ...headersFor('EDITOR', true), 'content-type': 'application/json' },
+      url: '/api/v1/admin/journals',
+      headers: { ...headers(admins[0]!, true), 'content-type': 'application/json' },
       payload: {
-        confirm: true,
-        expectedRowVersion: 0,
-        targetStatus: 'ACCEPTED',
-        publicReason: 'Integration decision',
-        internalReason: 'Integration decision basis',
+        code,
+        mode: 'NATIVE',
+        active: false,
+        fourEyesRequired: false,
+        acceptanceOpensAt: '2030-01-01T00:00:00.000Z',
+        acceptanceClosesAt: '2030-02-01T00:00:00.000Z',
+        localizations: {
+          'uz-Latn': { name: 'UAT jurnal', shortName: 'UAT', description: 'Sinov jurnali' },
+          ru: { name: 'Журнал UAT', shortName: 'UAT', description: 'Тестовый журнал' },
+          en: { name: 'UAT journal', shortName: 'UAT', description: 'Test journal' },
+        },
       },
     });
-    expect(editorDecision.statusCode).toBe(403);
+    expect(response.statusCode, response.body).toBe(201);
+    const journal = response.json<{
+      id: string;
+      code: string;
+      active: boolean;
+      acceptanceOpensAt: string;
+      acceptanceClosesAt: string;
+    }>();
+    expect(journal.code).toBe(code);
+    expect(journal.active).toBe(false);
+    expect(journal.acceptanceOpensAt).toBe('2030-01-01T00:00:00.000Z');
+    expect(journal.acceptanceClosesAt).toBe('2030-02-01T00:00:00.000Z');
+    expect(
+      await database!.auditLog.count({
+        where: { action: 'journal.created', entityId: journal.id, actorId: admins[0]!.employeeId },
+      }),
+    ).toBe(1);
+  });
 
-    const chiefDecision = await app.inject({
+  it('edits only DRAFT requirement versions with optimistic locking and audits the update', async () => {
+    const administrator = admins[0]!;
+    const writeHeaders = {
+      ...headers(administrator, true),
+      'content-type': 'application/json',
+    };
+    const created = await app.inject({
       method: 'POST',
-      url: `/api/v1/admin/submissions/${decisionSubmissionId}/transitions`,
-      headers: { ...headersFor('CHIEF_EDITOR', true), 'content-type': 'application/json' },
+      url: `/api/v1/admin/journals/${firstJournalId}/requirements`,
+      headers: writeHeaders,
       payload: {
-        confirm: true,
-        expectedRowVersion: 0,
-        targetStatus: 'ACCEPTED',
-        publicReason: 'Integration decision',
-        internalReason: 'Integration decision basis',
+        config: requirementConfig(),
+        changeNote: 'Initial structured draft',
+        localizations: requirementLocalizations('Initial'),
       },
     });
-    expect(chiefDecision.statusCode).toBe(200);
+    expect(created.statusCode, created.body).toBe(201);
+    const draft = created.json<{ id: string; rowVersion: number }>();
+
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/requirements/${draft.id}`,
+      headers: writeHeaders,
+      payload: {
+        config: requirementConfig(12 * 1024 * 1024),
+        changeNote: 'Updated structured draft',
+        localizations: requirementLocalizations('Updated'),
+        expectedRowVersion: draft.rowVersion,
+      },
+    });
+    expect(updated.statusCode, updated.body).toBe(200);
+    expect(updated.json()).toMatchObject({ rowVersion: draft.rowVersion + 1 });
+    expect(
+      updated
+        .json<{ localizations: { locale: string; title: string }[] }>()
+        .localizations.find(({ locale }) => locale === 'ru'),
+    ).toMatchObject({ title: 'Updated RU' });
+    expect(
+      await database!.auditLog.count({
+        where: {
+          action: 'journal.requirement.updated',
+          entityId: draft.id,
+          actorId: administrator.employeeId,
+        },
+      }),
+    ).toBe(1);
+
+    const submittedForReview = await app.inject({
+      method: 'POST',
+      url: `/api/v1/admin/requirements/${draft.id}/state`,
+      headers: writeHeaders,
+      payload: {
+        targetState: 'REVIEW',
+        expectedRowVersion: draft.rowVersion + 1,
+      },
+    });
+    expect(submittedForReview.statusCode, submittedForReview.body).toBe(200);
+
+    const immutable = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/requirements/${draft.id}`,
+      headers: writeHeaders,
+      payload: {
+        config: requirementConfig(),
+        changeNote: 'Must not update a version in review',
+        localizations: requirementLocalizations('Rejected update'),
+        expectedRowVersion: draft.rowVersion + 2,
+      },
+    });
+    expect(immutable.statusCode).toBe(409);
+    expect(immutable.json()).toMatchObject({ code: 'REQUIREMENT_IMMUTABLE' });
+
+    const returnedToDraft = await app.inject({
+      method: 'POST',
+      url: `/api/v1/admin/requirements/${draft.id}/state`,
+      headers: writeHeaders,
+      payload: {
+        targetState: 'DRAFT',
+        expectedRowVersion: draft.rowVersion + 2,
+      },
+    });
+    expect(returnedToDraft.statusCode, returnedToDraft.body).toBe(200);
+    const editableAgain = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/requirements/${draft.id}`,
+      headers: writeHeaders,
+      payload: {
+        config: requirementConfig(),
+        changeNote: 'Editable after return to draft',
+        localizations: requirementLocalizations('Returned draft'),
+        expectedRowVersion: draft.rowVersion + 3,
+      },
+    });
+    expect(editableAgain.statusCode, editableAgain.body).toBe(200);
+  });
+
+  it('serializes concurrent requirement version creation by multiple administrators', async () => {
+    const journal = await database!.journal.create({
+      data: { code: `RC${randomUUID().replaceAll('-', '').slice(0, 8)}`.toUpperCase() },
+    });
+    const responses = await Promise.all(
+      admins.map((administrator, index) =>
+        app.inject({
+          method: 'POST',
+          url: `/api/v1/admin/journals/${journal.id}/requirements`,
+          headers: {
+            ...headers(administrator, true),
+            'content-type': 'application/json',
+          },
+          payload: {
+            config: requirementConfig(),
+            changeNote: `Concurrent draft ${index + 1}`,
+            localizations: requirementLocalizations(`Concurrent ${index + 1}`),
+          },
+        }),
+      ),
+    );
+    expect(responses.map(({ statusCode }) => statusCode)).toEqual([201, 201]);
+    expect(
+      (
+        await database!.journalRequirementVersion.findMany({
+          where: { journalId: journal.id },
+          orderBy: { version: 'asc' },
+          select: { version: true },
+        })
+      ).map(({ version }) => version),
+    ).toEqual([1, 2]);
+  });
+
+  it('edits Telegram contact/content, applies journal fallback, and audits every change', async () => {
+    const administrator = admins[0]!;
+    const writeHeaders = {
+      ...headers(administrator, true),
+      'content-type': 'application/json',
+    };
+    const localized = (prefix: string) => [
+      {
+        locale: 'uz-Latn',
+        address: `${prefix} UZ address`,
+        workingHours: `${prefix} UZ hours`,
+        note: `${prefix} UZ note`,
+      },
+      {
+        locale: 'ru',
+        address: `${prefix} RU address`,
+        workingHours: `${prefix} RU hours`,
+        note: `${prefix} RU note`,
+      },
+      {
+        locale: 'en',
+        address: `${prefix} EN address`,
+        workingHours: `${prefix} EN hours`,
+        note: `${prefix} EN note`,
+      },
+    ];
+    const global = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/admin/telegram-content/contact',
+      headers: writeHeaders,
+      payload: {
+        journalId: null,
+        phone: '+998 71 000 00 00',
+        email: 'global-contact@example.invalid',
+        telegram: '@hmqa_global_uat',
+        localizations: localized('Global'),
+      },
+    });
+    expect(global.statusCode, global.body).toBe(200);
+
+    const journal = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/admin/telegram-content/contact',
+      headers: writeHeaders,
+      payload: {
+        journalId: firstJournalId,
+        phone: '+998 71 111 11 11',
+        email: null,
+        telegram: null,
+        localizations: localized('Journal'),
+      },
+    });
+    expect(journal.statusCode, journal.body).toBe(200);
+
+    const content = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/admin/telegram-content/items/HELP_SUBMIT',
+      headers: writeHeaders,
+      payload: {
+        uzLatn: 'UAT: jurnalni tanlang va fayllarni yuklang.',
+        ru: 'UAT: выберите журнал и загрузите файлы.',
+        en: 'UAT: choose a journal and upload the files.',
+      },
+    });
+    expect(content.statusCode, content.body).toBe(200);
+
+    const telegramRead = await app.inject({
+      method: 'GET',
+      url: `/api/v1/internal/telegram/content?locale=en&journalId=${firstJournalId}`,
+      headers: { 'x-hmqa-service-secret': serviceSecret },
+    });
+    expect(telegramRead.statusCode, telegramRead.body).toBe(200);
+    expect(telegramRead.json()).toMatchObject({
+      contact: {
+        phone: '+998 71 111 11 11',
+        email: 'global-contact@example.invalid',
+        telegram: '@hmqa_global_uat',
+        address: 'Journal EN address',
+        workingHours: 'Journal EN hours',
+        note: 'Journal EN note',
+      },
+      content: { HELP_SUBMIT: 'UAT: choose a journal and upload the files.' },
+    });
+
+    const localeFallback = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/admin/telegram-content/contact',
+      headers: writeHeaders,
+      payload: {
+        journalId: firstJournalId,
+        phone: null,
+        email: null,
+        telegram: null,
+        localizations: [
+          {
+            locale: 'uz-Latn',
+            address: null,
+            workingHours: null,
+            note: null,
+          },
+          {
+            locale: 'ru',
+            address: 'Journal RU fallback address',
+            workingHours: 'Journal RU fallback hours',
+            note: 'Journal RU fallback note',
+          },
+          { locale: 'en', address: null, workingHours: null, note: null },
+        ],
+      },
+    });
+    expect(localeFallback.statusCode, localeFallback.body).toBe(200);
+    const fallbackRead = await app.inject({
+      method: 'GET',
+      url: `/api/v1/internal/telegram/content?locale=en&journalId=${firstJournalId}`,
+      headers: { 'x-hmqa-service-secret': serviceSecret },
+    });
+    expect(fallbackRead.statusCode, fallbackRead.body).toBe(200);
+    expect(fallbackRead.json()).toMatchObject({
+      contact: {
+        phone: '+998 71 000 00 00',
+        email: 'global-contact@example.invalid',
+        telegram: '@hmqa_global_uat',
+        address: 'Journal RU fallback address',
+        workingHours: 'Journal RU fallback hours',
+        note: 'Journal RU fallback note',
+      },
+    });
+    expect(
+      await database!.auditLog.count({
+        where: {
+          actorId: administrator.employeeId,
+          action: { in: ['telegram.contact.updated', 'telegram.content.updated'] },
+        },
+      }),
+    ).toBeGreaterThanOrEqual(3);
+  });
+
+  it('rejects obsolete role input when inviting an administrator', async () => {
+    const administrator = admins[0]!;
+    const email = `obsolete-role-${randomUUID()}@example.invalid`;
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/employees',
+      headers: {
+        ...headers(administrator, true),
+        'content-type': 'application/json',
+      },
+      payload: {
+        email,
+        displayName: 'Obsolete role attempt',
+        role: 'EDITOR',
+        currentPassword: password,
+        currentTotp: generateTotpCode(administrator.secret),
+        confirmation: true,
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(await database!.employee.count({ where: { email } })).toBe(0);
+  });
+
+  it('assigns an article to an administrator without accepting obsolete assignment kinds', async () => {
+    const administrator = admins[0]!;
+    const adminRole = await database!.role.findUniqueOrThrow({ where: { code: 'ADMIN' } });
+    const expiredAdministrator = await database!.employee.create({
+      data: {
+        email: `expired-admin-${randomUUID()}@example.invalid`,
+        displayName: 'Expired administrator',
+        status: 'ACTIVE',
+        roles: {
+          create: {
+            roleId: adminRole.id,
+            expiresAt: new Date(Date.now() - 60_000),
+          },
+        },
+      },
+    });
+    const obsolete = await app.inject({
+      method: 'POST',
+      url: `/api/v1/admin/submissions/${assignmentSubmissionId}/assignments`,
+      headers: { ...headers(administrator, true), 'content-type': 'application/json' },
+      payload: {
+        employeeId: admins[1]!.employeeId,
+        reason: 'Integration assignment',
+        kind: 'EDITOR',
+      },
+    });
+    expect(obsolete.statusCode).toBe(400);
+
+    const expired = await app.inject({
+      method: 'POST',
+      url: `/api/v1/admin/submissions/${assignmentSubmissionId}/assignments`,
+      headers: { ...headers(administrator, true), 'content-type': 'application/json' },
+      payload: {
+        employeeId: expiredAdministrator.id,
+        reason: 'Must not assign expired access',
+      },
+    });
+    expect(expired.statusCode).toBe(422);
+
+    const options = await app.inject({
+      method: 'GET',
+      url: `/api/v1/admin/submissions/${assignmentSubmissionId}/assignment-options`,
+      headers: headers(administrator),
+    });
+    expect(options.statusCode, options.body).toBe(200);
+    expect(
+      options
+        .json<{ employees: { id: string }[] }>()
+        .employees.some(({ id }) => id === expiredAdministrator.id),
+    ).toBe(false);
+    const administrators = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/employees',
+      headers: headers(administrator),
+    });
+    expect(administrators.statusCode, administrators.body).toBe(200);
+    expect(
+      administrators
+        .json<{ items: { id: string }[] }>()
+        .items.some(({ id }) => id === expiredAdministrator.id),
+    ).toBe(false);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/admin/submissions/${assignmentSubmissionId}/assignments`,
+      headers: { ...headers(administrator, true), 'content-type': 'application/json' },
+      payload: {
+        employeeId: admins[1]!.employeeId,
+        reason: 'Integration assignment',
+      },
+    });
+    expect(response.statusCode, response.body).toBe(201);
+    expect(response.json()).toMatchObject({
+      employeeId: admins[1]!.employeeId,
+      kind: 'ADMIN',
+      status: 'PENDING',
+    });
+    expect(
+      await database!.auditLog.count({
+        where: {
+          action: 'submission.assignment.created',
+          entityId: response.json<{ id: string }>().id,
+          actorId: administrator.employeeId,
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it('prevents disabling the current administrator and never leaves zero active admins', async () => {
+    const current = admins[0]!;
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/employees/${current.employeeId}`,
+      headers: { ...headers(current, true), 'content-type': 'application/json' },
+      payload: {
+        status: 'DISABLED',
+        currentPassword: password,
+        currentTotp: generateTotpCode(current.secret),
+        confirmation: true,
+      },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ code: 'SELF_DISABLE_FORBIDDEN' });
+    expect(
+      await database!.employee.count({
+        where: { status: 'ACTIVE', roles: { some: { role: { code: 'ADMIN' } } } },
+      }),
+    ).toBeGreaterThan(0);
   });
 });

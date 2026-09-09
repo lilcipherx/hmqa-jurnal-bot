@@ -22,9 +22,25 @@ interface Journal {
     description: string;
     contactText: string | null;
   }[];
-  currentRequirement: { version: number; state: string } | null;
+  currentRequirement: { id: string; version: number; state: string } | null;
   _count: { submissions: number; requirementVersions: number };
-  requirementVersions: { id: string; version: number; state: string; rowVersion: number }[];
+  requirementVersions: {
+    id: string;
+    version: number;
+    state: string;
+    rowVersion: number;
+    config: unknown;
+    changeNote: string;
+    createdAt: string;
+    localizations: {
+      locale: string;
+      title: string;
+      summary: string;
+      body: string;
+      help: string | null;
+      contact: string | null;
+    }[];
+  }[];
 }
 export default async function JournalsPage() {
   const locale = await currentLocale();
@@ -34,7 +50,10 @@ export default async function JournalsPage() {
   ]);
   return (
     <>
-      <PageHeader title={translate(locale, 'admin.journals.heading')} />
+      <PageHeader
+        title={translate(locale, 'admin.journals.heading')}
+        description={translate(locale, 'admin.journals.page_description')}
+      />
       <ResourceTable
         caption={translate(locale, 'admin.journals.heading')}
         headers={[
@@ -79,6 +98,10 @@ export default async function JournalsPage() {
           )}
           labels={{
             createJournal: translate(locale, 'admin.journals.create'),
+            basicInfo: translate(locale, 'admin.journals.basic_info'),
+            localizedContent: translate(locale, 'admin.journals.localized_content'),
+            submissionSettings: translate(locale, 'admin.journals.submission_settings'),
+            datesAndDeadlines: translate(locale, 'admin.journals.dates_deadlines'),
             editJournal: translate(locale, 'admin.journals.edit'),
             createRequirement: translate(locale, 'admin.journals.create_requirement'),
             code: translate(locale, 'admin.journals.code'),
@@ -90,14 +113,37 @@ export default async function JournalsPage() {
             contact: translate(locale, 'admin.journals.contact'),
             journal: translate(locale, 'admin.table.journal'),
             changeNote: translate(locale, 'admin.journals.change_note'),
-            config: translate(locale, 'admin.journals.config'),
+            files: translate(locale, 'admin.journals.files'),
+            allowPdf: translate(locale, 'admin.journals.allow_pdf'),
+            includeSupplement: translate(locale, 'admin.journals.include_supplement'),
+            supplementRequired: translate(locale, 'admin.journals.supplement_required'),
+            limits: translate(locale, 'admin.journals.limits'),
+            maxMiB: translate(locale, 'admin.journals.max_mib'),
+            abstractMin: translate(locale, 'admin.journals.abstract_min'),
+            abstractMax: translate(locale, 'admin.journals.abstract_max'),
+            keywordMin: translate(locale, 'admin.journals.keyword_min'),
+            keywordMax: translate(locale, 'admin.journals.keyword_max'),
+            coauthorMax: translate(locale, 'admin.journals.coauthor_max'),
+            workflow: translate(locale, 'admin.journals.workflow'),
+            reviewModel: translate(locale, 'admin.journals.review_model'),
+            noExternalReview: translate(locale, 'admin.journals.no_external_review'),
+            singleBlind: translate(locale, 'admin.journals.single_blind'),
+            doubleBlind: translate(locale, 'admin.journals.double_blind'),
+            reviewerCount: translate(locale, 'admin.journals.reviewer_count'),
             title: translate(locale, 'submission.preview.title'),
             summary: translate(locale, 'admin.journals.summary'),
             body: translate(locale, 'admin.journals.body'),
             create: translate(locale, 'admin.action.create'),
             lifecycle: translate(locale, 'admin.translations.lifecycle'),
             advance: translate(locale, 'admin.translations.advance'),
-            invalidJson: translate(locale, 'admin.journals.invalid_json'),
+            invalidConfig: translate(locale, 'admin.journals.invalid_config'),
+            requirementHistory: translate(locale, 'admin.journals.requirement_history'),
+            requirementPreview: translate(locale, 'admin.journals.requirement_preview'),
+            editRequirement: translate(locale, 'admin.journals.edit_requirement'),
+            returnDraft: translate(locale, 'admin.journals.return_draft'),
+            activeRequirement: translate(locale, 'admin.journals.active_requirement'),
+            noRequirements: translate(locale, 'admin.journals.no_requirements'),
+            help: translate(locale, 'admin.journals.help'),
             open: translate(locale, 'admin.journals.open'),
             close: translate(locale, 'admin.journals.close'),
             acceptanceOpens: translate(locale, 'admin.journals.acceptance_opens'),

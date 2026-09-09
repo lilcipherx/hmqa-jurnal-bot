@@ -1,15 +1,17 @@
-# ADR 0007: Public CI runner trust boundary
+# ADR 0007: Shared self-hosted CI runner trust boundary
 
 ## Decision
 
-Run public-repository CI on disposable GitHub-hosted Ubuntu 24.04 runners with top-level `contents: read` permission. Do not execute pull-request code on a persistent self-hosted runner. Do not use `pull_request_target`. Checkout disables credential persistence, actions are pinned to commit SHA, and fork/Dependabot jobs receive no project secrets.
+Run repository workflows on the Academy's UpCloud Ubuntu 24.04 x86_64 runner registrations using the required labels `[self-hosted, Linux, X64]`. Each repository has its own runner registration. Checkout disables credential persistence, workflow permissions are minimal, actions are pinned to commit SHA, and production credentials are never supplied to CI.
 
-The runtime job starts its own isolated Docker Compose project and uses only the explicitly labelled test configuration. Production credentials are never required by CI.
+Untrusted pull requests from forks do not execute on the persistent runner. Job conditions permit push, schedule, and same-repository pull-request events only. Maintainers review fork changes before bringing them onto a trusted branch. The workflows never use `pull_request_target`.
+
+The runtime job creates a unique Docker Compose project and uses only explicitly labelled synthetic test configuration. Cleanup is project-scoped. A failed job must not reuse application containers or data volumes from another run.
 
 ## Rationale
 
-A public fork can change application code, package lifecycle behavior, tests, Dockerfiles, and Compose commands. Running that code on a shared persistent runner would expose the runner host and any residual credentials. Disposable hosted runners provide the required Linux/Docker boundary without trusting contributor code.
+The available standard infrastructure is a shared UpCloud X64 host with separate repository runner registrations. Persistent runners require a stricter source trust boundary than disposable hosted runners because a fork can change lifecycle scripts, tests, Dockerfiles, and Compose commands. Refusing automatic fork execution preserves the host while keeping exact Linux/Docker acceptance on the required runner.
 
 ## Consequences
 
-CI usage is subject to GitHub-hosted runner availability and limits. Staging deployment remains a separate, explicitly authorized workflow and must not be added to the pull-request trust boundary.
+Fork contributors need maintainer review before CI execution. Main pushes and same-repository pull requests receive the complete fail-closed quality, database, E2E, runtime, and CodeQL gates. Staging deployment remains separate from the CI trust boundary.

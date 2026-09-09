@@ -11,28 +11,63 @@ interface Submission {
   status: string;
   submittedAt: string;
   journal: { code: string };
+  owner: {
+    authorProfile: { fullName: string | null; firstName: string; lastName: string } | null;
+  };
+  versions: { metadata: { titles: unknown } | null }[];
 }
 export default async function SubmissionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; journalId?: string; q?: string }>;
+  searchParams: Promise<{ status?: string; group?: string; journalId?: string; q?: string }>;
 }) {
   const locale = await currentLocale();
   const query = await searchParams;
+  const selectedGroup = query.group ?? (query.status ? 'all' : 'new');
   const parameters = new URLSearchParams({ limit: '100' });
   if (query.status) parameters.set('status', query.status);
+  else parameters.set('group', selectedGroup);
   if (query.journalId) parameters.set('journalId', query.journalId);
   if (query.q) parameters.set('q', query.q);
   const [data, journals] = await Promise.all([
     adminFetch<{ items: Submission[] }>(`/api/v1/admin/submissions?${parameters}`),
     adminFetch<{ items: { id: string; code: string }[] }>('/api/v1/admin/journals'),
   ]);
+  const localizedTitle = (titles: unknown) => {
+    if (!titles || typeof titles !== 'object' || Array.isArray(titles)) return '—';
+    const values = titles as Record<string, unknown>;
+    for (const key of [locale, 'ru', 'en', 'uz-Latn']) {
+      const title = values[key];
+      if (typeof title === 'string' && title.trim()) return title;
+    }
+    return '—';
+  };
   return (
     <>
       <PageHeader
         title={translate(locale, 'admin.submissions.heading')}
         description={translate(locale, 'admin.submissions.description')}
       />
+      <nav className="filter-tabs" aria-label={translate(locale, 'admin.filter.status')}>
+        {[
+          ['new', 'admin.submissions.group.new'],
+          ['action', 'admin.submissions.group.action'],
+          ['review', 'admin.submissions.group.review'],
+          ['revision', 'admin.submissions.group.revision'],
+          ['accepted', 'admin.submissions.group.accepted'],
+          ['rejected', 'admin.submissions.group.rejected'],
+          ['published', 'admin.submissions.group.published'],
+          ['all', 'admin.filter.all'],
+        ].map(([group, key]) => (
+          <Link
+            className={selectedGroup === group ? 'active' : ''}
+            href={`/submissions?group=${group}`}
+            key={group}
+          >
+            {translate(locale, key as TranslationKey)}
+          </Link>
+        ))}
+      </nav>
       <form className="panel form-stack" method="get">
         <label className="field" htmlFor="q">
           {translate(locale, 'admin.filter.search')}
@@ -84,6 +119,8 @@ export default async function SubmissionsPage({
         caption={translate(locale, 'admin.submissions.heading')}
         headers={[
           translate(locale, 'admin.table.id'),
+          translate(locale, 'submission.preview.title'),
+          translate(locale, 'submission.preview.author'),
           translate(locale, 'admin.table.journal'),
           translate(locale, 'admin.table.status'),
           translate(locale, 'admin.table.submitted'),
@@ -94,6 +131,12 @@ export default async function SubmissionsPage({
           <span className="identifier" translate="no">
             {item.publicId}
           </span>,
+          localizedTitle(item.versions[0]?.metadata?.titles),
+          item.owner.authorProfile?.fullName ||
+            [item.owner.authorProfile?.lastName, item.owner.authorProfile?.firstName]
+              .filter(Boolean)
+              .join(' ') ||
+            translate(locale, 'common.not_specified'),
           item.journal.code,
           <span className="badge">
             {translate(locale, `status.${item.status.toLowerCase()}` as TranslationKey)}

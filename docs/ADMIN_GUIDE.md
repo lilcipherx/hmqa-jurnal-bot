@@ -2,78 +2,73 @@
 
 ## Initial administrator bootstrap
 
-Never run the development seed in staging or production. After forward migrations on a clean environment, create the first administrator through an interactive one-time invitation:
+Never run the development seed in staging or production. After forward migrations on a clean environment, create the first administrator through the interactive one-time invitation:
 
 ```bash
 docker compose --env-file .env.production run --rm -it api pnpm --filter @hmqa/database bootstrap:admin
 ```
 
-The command interactively asks for the approved email and display name, creates canonical RBAC records and an audited `INVITED` administrator, and prints a single-use 24-hour invitation URL. It does not accept or print a password. Open the URL over trusted HTTPS, enroll the displayed TOTP secret in the owner's authenticator, set a strong unique password, enter the current code, and complete activation. The bootstrap refuses to create a second initial administrator.
+The command asks only for the approved email and display name, creates the canonical `ADMIN` membership, and prints a single-use 24-hour invitation URL. It never accepts or prints a password. Open the URL over trusted HTTPS, set a strong unique password, enroll TOTP, and complete activation. The bootstrap refuses to create a second initial administrator.
 
-## Access and roles
+## Administrators and access
 
-Staff accounts are invitation-only. The one-time invitation expires after 24 hours and displays the TOTP enrollment secret only to the invitee. A password must contain at least 14 characters. Five failed logins trigger a 15-minute lock. Sessions have idle and absolute expiry; sensitive decisions require a recent TOTP-backed step-up window.
+The Admin Panel has one login role: `ADMIN`. More than one administrator account is supported, and every active administrator has the same complete product access. Former operator/editor/chief-editor/content-admin/auditor/reviewer role names are not selectable roles. Reviewers are standalone journal contacts and never authenticate to the Admin Panel.
+
+Invite another administrator from **Administrators**. Invitations are single-use and expire after 24 hours. A password must contain at least 14 characters. Five failed logins trigger a 15-minute lock. Sessions have idle and absolute expiry, and sensitive account operations require a current password plus TOTP step-up and explicit confirmation.
 
 ### Password and TOTP maintenance
 
-Use Settings → Security to change your own password or reset and re-enroll TOTP. Enter the current password and current authenticator code, submit once to review the warning, then explicitly confirm. A successful password change or TOTP reset signs the account out on every device.
+Use **Settings → Security** to change your own password or reset and re-enroll TOTP. Enter the current password and current authenticator code, review the warning, and explicitly confirm. A successful password change or TOTP reset signs the account out on every device.
 
-An `ADMIN` can use Users → Reset 2FA for another active staff member. The administrator must enter their own current password and TOTP and confirm twice. The action invalidates the target's old seed and all target sessions; it does not reveal a replacement seed to the administrator. At the target's next login, they enter the correct password without a TOTP code, enroll the newly displayed seed in their authenticator, and prove possession with a generated code. The enrollment challenge expires after ten minutes.
+An administrator can use **Administrators → Reset 2FA** for another administrator. The acting administrator provides their own current password and TOTP and confirms the operation. The action invalidates the target's old secret and all target sessions; it never reveals a replacement secret. At the target's next password-authenticated login, the application requires enrollment of a newly generated TOTP secret. The enrollment challenge expires after ten minutes.
 
-Do not treat Reset 2FA as a way to run an account without 2FA. There is no normal permanent-disable flow, including for `ADMIN` and `CHIEF_EDITOR`. If the only administrator loses both password and authenticator access, follow the Academy credential-recovery incident procedure; do not create an untracked administrator or edit credential fields manually.
+There is no normal permanent-disable flow. An administrator whose TOTP was reset cannot use the panel until re-enrollment is complete. If all administrators lose both password and authenticator access, follow the Academy credential-recovery incident procedure; never create an untracked account or edit credential fields manually.
 
-The backend, not the visibility of a button, enforces permissions and journal scope:
+## Navigation
 
-- `OPERATOR`: technical review, assignment assistance, scoped files, and notification replay;
-- `EDITOR`: editorial workflow, reviewers, messages, and prepared decisions;
-- `REVIEWER`: only assigned anonymized packages and their own reviews;
-- `CHIEF_EDITOR`: decision approval, publication, scoped exports, and four-eyes authority;
-- `CONTENT_ADMIN`: journals, requirement versions, and translation versions;
-- `ADMIN`: identities, roles, operations, and global audit, without implicit manuscript access;
-- `AUDITOR`: read-only global audit/operations and non-PII exports.
+Normal navigation contains exactly these product areas:
 
-## Journal setup
+1. Dashboard
+2. Articles
+3. Journals
+4. Reviewers
+5. Telegram bot
+6. Notifications
+7. Administrators
+8. Settings
 
-Create all three localizations. A journal can be `NATIVE`, `CLOSED`, `EXTERNAL_LINK`, `API_SYNC`, or archived. Only `NATIVE` with a published current requirement version and an active acceptance window appears as available for a native submission.
+The panel language switcher supports Uzbek, Russian, and English, persists the choice in a cookie, and returns to the current page. Audit and privacy machinery remain backend controls but are intentionally absent from normal navigation.
 
-Requirement lifecycle is `DRAFT → REVIEW → APPROVED → PUBLISHED → RETIRED`. Approval requires an actor other than the creator. Publishing pins the version as the journal's current version. Existing drafts/submissions retain their originally acknowledged version.
+## Journal and Telegram content setup
 
-Each requirement configuration also pins `workflow.reviewModel`, `workflow.requiredReviewerCount`, and `workflow.decisionRequiresCompletedReviews`. A blind model requires at least one reviewer; a no-external-review model requires zero. The `UNDER_REVIEW` transition counts only accepted, conflict-free assignments, and an editorial decision cannot bypass completed reviews when the published policy requires them.
+Create all three journal localizations. A journal can be `NATIVE`, `CLOSED`, `EXTERNAL_LINK`, `API_SYNC`, or archived. Only `NATIVE` with a published current requirement version and an active acceptance window appears for native submission.
 
-The seed is safe by default: journals are closed, and unresolved Academy policies are not silently published.
+Use **+ Add journal** to enter the basic data, three localized descriptions and contacts, submission settings, and acceptance dates. Requirement versions use structured controls rather than a JSON editor. A draft can be previewed in UZ/RU/EN and edited with optimistic locking; a version in review can be returned to draft. Approval follows the four-eyes rule, and publishing explicitly marks that version as the active version read by Telegram. Earlier versions remain visible and immutable as history.
+
+Requirement lifecycle is `DRAFT → REVIEW → APPROVED → PUBLISHED → RETIRED`. Approval requires a second administrator when four-eyes approval is enabled. Publishing pins the current version; existing drafts and submissions retain the version they acknowledged.
+
+Use **Telegram bot** to manage localized Help content and contacts. A global contact can contain phone, email, Telegram username, address, working hours, and note. A journal-specific contact overrides only populated fields; missing fields fall back to the global contact. User-facing content uses the user's selected locale with the documented locale fallback policy.
+
+## Author profile
+
+The author profile has seven conceptual fields: full name, phone, email, organization, position, scientific degree, and academic title. Degree and title use normalized codes with localized choices and an explicit custom **Other** value. Country, city, and ORCID are retained only as legacy database columns and must not be requested or shown in the current Telegram flow.
 
 ## Submission operations
 
-The public ID format is `HMQA-{JOURNAL}-{UTC YEAR}-{SEQUENCE}`. Receipt means `SUBMITTED`; technical registration means `REGISTERED`; neither means publication acceptance. Only a separately authorized editorial decision reaches `ACCEPTED`.
+The public ID format is `HMQA-{JOURNAL}-{UTC YEAR}-{SEQUENCE}`. Receipt means `SUBMITTED`; technical registration means `REGISTERED`; neither means publication acceptance. Only a separate editorial decision reaches `ACCEPTED`.
 
-Use the submission page to:
+Use the article page to inspect immutable metadata/file versions, scan and preflight results, the pinned requirements version, comments, status history, reviewer assignments, and decisions. Administrators can assign another active administrator to internal processing; there is no staff-role selector. A reviewer is selected from the standalone reviewer directory and receives the specifically prepared anonymized package according to Academy policy.
 
-1. inspect immutable metadata/file versions, SHA-256, scan/preflight results, requirements version, and status history;
-2. upload a separately prepared anonymized DOCX/PDF package, attest the manual check, wait for signature/ClamAV/PF-015 completion, then assign an eligible reviewer and deadline;
-3. send either public author messages or internal comments;
-4. move status only through the allowed transition list and required guards;
-5. prepare a reasoned accept/reject proposal as editor;
-6. approve that proposal as a different chief editor while the step-up window is valid;
-7. publish only with a publication reference.
+Correction or revision requests require a public reason and deadline. The author receives a localized queued notification and submits a new immutable version through Telegram. Old files and versions are never overwritten.
 
-Correction/revision requests require a public reason and deadline. The author receives a localized queued notification and can submit a new immutable version in Telegram. Old files and versions are never overwritten.
+## Reviewers
 
-An anonymized reviewer package is an editorial derivative, not a replacement for the author's file. PF-015 reports known identifier field classes without storing matching names or manuscript excerpts and always leaves a manual-verification warning. Do not assign a package with a failed/blocking run or unresolved identifier error.
+Reviewers are domain records containing name, email, optional phone, affiliation, expertise, and active state. They are not employees, administrator accounts, or role memberships. Administrators create and edit reviewer contacts, prepare an anonymized derivative, assign it with a deadline, and record the returned review through the editorial workflow. Never provide a reviewer with an administrator credential merely to deliver a manuscript.
 
-## Review workspace
+## Notifications, audit, and reports
 
-Reviewers see only their assignments. They must accept or decline (decline records a conflict declaration in the current interface) before submitting a recommendation, public author comments, and optional confidential editorial comments. A completed review cannot be replaced through the UI; correction requires an audited administrative process.
+Notification records expose delivery state and attempt count. Failed/dead-letter records can be replayed after the permanent cause is corrected; replay is durable and audited.
 
-## Notifications and translations
+Audit records include actor, role, action, entity, time, before/after, hashed network data, request/correlation IDs, and a tamper-evident previous-event hash. There is no application delete endpoint. Audit is retained as a backend/operations control even though it is not a normal navigation item.
 
-Notifications expose delivery state and attempt count. `FAILED`/`DEAD_LETTER` records can be explicitly replayed; replay increments a durable generation and is audited. Do not replay before correcting permanent Telegram/account errors.
-
-Translation versions use the same reviewed lifecycle. Worker delivery snapshots a published database template before rendering; if none exists, the compiled, parity-tested bundle is used. Placeholder names such as `{public_id}` must match the event variables.
-
-## Audit and reports
-
-Audit records include actor, role, action, entity, time, before/after, hashed IP/user agent, request/correlation IDs, journal scope, and a tamper-evident previous-event hash. There is no admin delete endpoint. Journal-scoped staff cannot query events outside their scopes.
-
-CSV reports exclude author PII and neutralize spreadsheet formulas. Export issuance is audited. Use a separately approved process for any PII-bearing report.
-
-The Privacy section lists data-subject cases, enforces the case transition whitelist, and records decisions/execution reports. Legal holds require recent 2FA step-up and block erasure execution until released. Production erasure remains disabled until the Academy enables an approved retention policy.
+CSV exports neutralize spreadsheet formulas and exclude author PII by default. Privacy cases and legal holds remain backend capabilities governed by Academy policy; no privacy-request button is exposed in Telegram and no privacy section is exposed in normal Admin Panel navigation.

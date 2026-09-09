@@ -165,18 +165,15 @@ suite('author submission lifecycle', () => {
     const draft = draftResponse.json<{ id: string; rowVersion: number }>();
     const context = {
       requirementsAcknowledgedAt: new Date().toISOString(),
-      firstName: 'E2E',
-      lastName: 'Author',
-      middleName: 'Verified',
+      fullName: 'E2E Author Verified',
       phone: '+999000000001',
       email: 'e2e@example.invalid',
       organization: 'Academy',
       position: 'Researcher',
-      degree: 'PhD',
-      academicTitle: '-',
-      country: 'Uzbekistan',
-      city: 'Tashkent',
-      orcid: '0000-0002-1825-0097',
+      degreeCode: 'PHD',
+      degreeCustom: null,
+      titleCode: 'NONE',
+      titleCustom: null,
       coauthors: '-',
       articleTitle: 'Integration evidence',
       articleType: 'Research article',
@@ -394,12 +391,11 @@ suite('author submission lifecycle', () => {
       manuscriptLanguage: 'en',
     });
     expect(stored.versions[0]!.authors[0]!.dataSnapshot).toMatchObject({
-      middleName: 'Verified',
-      degree: 'PhD',
-      academicTitle: null,
-      country: 'Uzbekistan',
-      city: 'Tashkent',
-      orcid: '0000-0002-1825-0097',
+      fullName: 'E2E Author Verified',
+      degreeCode: 'PHD',
+      degreeCustom: null,
+      titleCode: 'NONE',
+      titleCustom: null,
     });
     expect(stored.statusHistory[0]).toMatchObject({ fromStatus: 'DRAFT', toStatus: 'SUBMITTED' });
     expect(stored.notifications[0]!.eventCode).toBe('submission.submitted');

@@ -26,34 +26,10 @@ function actorFor(target: SubmissionStatus): ScopedActor {
       stepUpVerified: false,
     };
   }
-  if (['TECHNICAL_REVIEW', 'NEEDS_CORRECTION', 'REGISTERED'].includes(target)) {
-    return {
-      id: randomUUID(),
-      role: 'OPERATOR',
-      journalIds: new Set([journalId]),
-      stepUpVerified: true,
-    };
-  }
-  if (['EDITORIAL_REVIEW', 'UNDER_REVIEW', 'REVISION_REQUESTED'].includes(target)) {
-    return {
-      id: randomUUID(),
-      role: 'EDITOR',
-      journalIds: new Set([journalId]),
-      stepUpVerified: true,
-    };
-  }
-  if (target === 'ARCHIVED') {
-    return {
-      id: randomUUID(),
-      role: 'ADMIN',
-      journalIds: new Set<string>(),
-      stepUpVerified: true,
-    };
-  }
   return {
     id: randomUUID(),
-    role: 'CHIEF_EDITOR',
-    journalIds: new Set([journalId]),
+    role: 'ADMIN',
+    journalIds: new Set<string>(),
     stepUpVerified: true,
   };
 }
@@ -128,8 +104,8 @@ suite('transactional submission workflow', () => {
       targetStatus: 'TECHNICAL_REVIEW',
       actor: {
         id: randomUUID(),
-        role: 'OPERATOR',
-        journalIds: new Set([journalId]),
+        role: 'ADMIN',
+        journalIds: new Set<string>(),
         stepUpVerified: true,
       },
       context: { journalId, ownerId: userId },
@@ -166,8 +142,8 @@ suite('transactional submission workflow', () => {
         targetStatus: 'ACCEPTED',
         actor: {
           id: randomUUID(),
-          role: 'CHIEF_EDITOR',
-          journalIds: new Set([journalId]),
+          role: 'ADMIN',
+          journalIds: new Set<string>(),
           stepUpVerified: true,
         },
         context: {

@@ -158,15 +158,10 @@ async function seedPeople() {
   if (!encryptionKey) throw new Error('ENCRYPTION_KEY is required for the development seed');
   const passwordHash = await hashPassword(password);
   const employees = [
-    [process.env.SEED_ADMIN_EMAIL ?? 'admin@example.invalid', 'Synthetic Admin', 'ADMIN'],
-    ['operator@example.invalid', 'Synthetic Operator', 'OPERATOR'],
-    ['editor@example.invalid', 'Synthetic Editor', 'EDITOR'],
-    ['reviewer@example.invalid', 'Synthetic Reviewer', 'REVIEWER'],
-    ['chief-editor@example.invalid', 'Synthetic Chief Editor', 'CHIEF_EDITOR'],
-    ['content-admin@example.invalid', 'Synthetic Content Admin', 'CONTENT_ADMIN'],
-    ['auditor@example.invalid', 'Synthetic Auditor', 'AUDITOR'],
+    [process.env.SEED_ADMIN_EMAIL ?? 'admin@example.invalid', 'Synthetic Admin'],
+    ['admin-2@example.invalid', 'Synthetic Second Admin'],
   ] as const;
-  for (const [email, displayName, roleCode] of employees) {
+  for (const [email, displayName] of employees) {
     const employee = await database.employee.upsert({
       where: { email },
       update: {
@@ -184,32 +179,12 @@ async function seedPeople() {
         totpEnabled: true,
       },
     });
-    const role = await database.role.findUniqueOrThrow({ where: { code: roleCode } });
+    const role = await database.role.findUniqueOrThrow({ where: { code: 'ADMIN' } });
     await database.employeeRole.upsert({
       where: { employeeId_roleId: { employeeId: employee.id, roleId: role.id } },
       update: {},
       create: { employeeId: employee.id, roleId: role.id },
     });
-    if (['OPERATOR', 'EDITOR', 'CHIEF_EDITOR', 'CONTENT_ADMIN'].includes(roleCode)) {
-      const journals = await database.journal.findMany({ select: { id: true } });
-      for (const journal of journals)
-        await database.employeeJournalScope.upsert({
-          where: { employeeId_journalId: { employeeId: employee.id, journalId: journal.id } },
-          update: {},
-          create: { employeeId: employee.id, journalId: journal.id },
-        });
-    }
-    if (roleCode === 'REVIEWER') {
-      await database.reviewerProfile.upsert({
-        where: { employeeId: employee.id },
-        update: {},
-        create: {
-          employeeId: employee.id,
-          expertise: ['synthetic-law'],
-          affiliation: 'Example Academy',
-        },
-      });
-    }
   }
 
   const author = await database.user.upsert({
@@ -222,6 +197,7 @@ async function seedPeople() {
     update: {},
     create: {
       userId: author.id,
+      fullName: 'Test Author',
       firstName: 'Test',
       lastName: 'Author',
       phoneCipher: encryptSecret('+999000000000', encryptionKey),
@@ -230,6 +206,8 @@ async function seedPeople() {
       emailHash: createHash('sha256').update('author@example.invalid').digest('hex'),
       organization: 'Example Academy',
       position: 'Researcher',
+      degreeCode: 'NONE',
+      titleCode: 'NONE',
     },
   });
 }

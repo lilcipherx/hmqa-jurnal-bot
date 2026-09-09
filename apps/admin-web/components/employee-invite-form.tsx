@@ -8,15 +8,7 @@ function text(form: FormData, name: string): string {
   return typeof value === 'string' ? value : '';
 }
 
-export function EmployeeInviteForm({
-  journals,
-  labels,
-  roleLabels,
-}: {
-  journals: { id: string; code: string }[];
-  labels: Record<string, string>;
-  roleLabels: Record<string, string>;
-}) {
+export function EmployeeInviteForm({ labels }: { labels: Record<string, string> }) {
   const [result, setResult] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -32,13 +24,9 @@ export function EmployeeInviteForm({
       body: JSON.stringify({
         email: form.get('email'),
         displayName: form.get('displayName'),
-        role: form.get('role'),
-        journalIds: form.getAll('journalIds'),
-        reviewerAffiliation: form.get('reviewerAffiliation') || undefined,
-        reviewerExpertise: text(form, 'reviewerExpertise')
-          .split(',')
-          .map((item) => item.trim())
-          .filter(Boolean),
+        currentPassword: text(form, 'currentPassword'),
+        currentTotp: text(form, 'currentTotp'),
+        confirmation: form.get('confirmation') === 'on',
       }),
     });
     if (response.ok) {
@@ -64,38 +52,16 @@ export function EmployeeInviteForm({
         <input name="email" type="email" required />
       </label>
       <label className="field">
-        {labels.role}
-        <select name="role" required>
-          {[
-            'OPERATOR',
-            'EDITOR',
-            'REVIEWER',
-            'CHIEF_EDITOR',
-            'CONTENT_ADMIN',
-            'ADMIN',
-            'AUDITOR',
-          ].map((role) => (
-            <option key={role} value={role}>
-              {roleLabels[role] ?? role}
-            </option>
-          ))}
-        </select>
-      </label>
-      <fieldset className="field">
-        <legend>{labels.journals}</legend>
-        {journals.map((journal) => (
-          <label className="check-row" key={journal.id}>
-            <input type="checkbox" name="journalIds" value={journal.id} /> {journal.code}
-          </label>
-        ))}
-      </fieldset>
-      <label className="field">
-        {labels.affiliation}
-        <input name="reviewerAffiliation" />
+        {labels.currentPassword}
+        <input name="currentPassword" type="password" autoComplete="current-password" required />
       </label>
       <label className="field">
-        {labels.expertise}
-        <input name="reviewerExpertise" />
+        {labels.currentTotp}
+        <input name="currentTotp" inputMode="numeric" pattern="[0-9]{6}" required />
+      </label>
+      <label className="checkbox-row">
+        <input name="confirmation" type="checkbox" required />
+        <span>{labels.confirm}</span>
       </label>
       <div role="alert" className={error ? 'error' : 'sr-only'}>
         {error}
