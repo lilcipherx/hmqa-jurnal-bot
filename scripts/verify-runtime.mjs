@@ -219,9 +219,9 @@ try {
     ['exec', '-T', 'nginx', 'wget', '--spider', '--quiet', 'http://127.0.0.1:8080/'],
     180_000,
   );
-  compose(['build', 'browser-tests'], { label: 'Build isolated Playwright Chromium runner' });
+  compose(['build', 'browser-tests'], { label: 'Build isolated Playwright browser runner' });
   compose(['run', '--rm', '--no-deps', 'browser-tests'], {
-    label: 'Browser authentication, TOTP management, protected navigation, and logout test',
+    label: 'Cross-browser authentication, protected navigation, TOTP management, and logout tests',
   });
   compose(['run', '--rm', 'runtime-tests', 'pnpm', 'db:seed'], {
     label: 'Restore deterministic synthetic staff credentials after browser security tests',

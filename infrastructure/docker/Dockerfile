@@ -31,7 +31,7 @@ CMD ["pnpm", "--filter", "@hmqa/api", "start"]
 FROM verification AS browser-verification
 USER root
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN pnpm exec playwright install --with-deps chromium \
+RUN pnpm exec playwright install --with-deps chromium firefox webkit \
   && chmod -R a+rX /ms-playwright
 USER node
 CMD ["pnpm", "test:browser"]
