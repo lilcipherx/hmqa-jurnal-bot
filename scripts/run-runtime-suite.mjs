@@ -71,6 +71,7 @@ if (result.status !== 0) {
     for (const testFile of failedReport.testResults ?? []) {
       if (testFile.status !== 'failed') continue;
       process.stderr.write(`FAILED ${testFile.name ?? 'unknown test file'}\n`);
+      if (testFile.message) process.stderr.write(`${String(testFile.message).slice(0, 8_000)}\n`);
       for (const assertion of testFile.assertionResults ?? []) {
         if (assertion.status !== 'failed') continue;
         process.stderr.write(`  ${assertion.fullName ?? assertion.title ?? 'unknown assertion'}\n`);
