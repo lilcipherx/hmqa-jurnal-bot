@@ -6,6 +6,7 @@ const test = parse(readFileSync('docker-compose.test.yml', 'utf8'), { merge: tru
 const dockerfile = readFileSync('infrastructure/docker/Dockerfile', 'utf8');
 const backupDockerfile = readFileSync('infrastructure/docker/backup.Dockerfile', 'utf8');
 const restoreScript = readFileSync('infrastructure/backup/restore.sh', 'utf8');
+const innerNginx = readFileSync('infrastructure/nginx/nginx.conf', 'utf8');
 const hostNginx = readFileSync('infrastructure/nginx/hmqa-staging.conf', 'utf8');
 const requiredServices = [
   'postgres',
@@ -133,6 +134,16 @@ assert(
 assert(
   !/sha256sum --check/.test(restoreScript),
   'Restore checksums must not use GNU-only sha256sum options',
+);
+assert(
+  /resolver 127\.0\.0\.11[\s\S]*server api:3001 resolve;[\s\S]*server bot:3002 resolve;[\s\S]*server admin-web:3000 resolve;/.test(
+    innerNginx,
+  ),
+  'Application gateway must re-resolve recreated Docker upstreams',
+);
+assert(
+  /location \/documentation[\s\S]*proxy_pass http:\/\/api;/.test(innerNginx),
+  'Application gateway must route OpenAPI documentation to the API',
 );
 assert(/listen 443 ssl;/.test(hostNginx), 'Host nginx must terminate TLS');
 assert(

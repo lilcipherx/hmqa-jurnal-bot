@@ -94,6 +94,11 @@ docker compose --env-file .env ps
 docker compose --env-file .env logs --tail=200 migrate api bot worker admin-web nginx
 ```
 
+The bundled nginx gateway uses Docker's embedded DNS resolver for application upstreams, so
+recreated API, bot, and admin containers do not leave stale upstream IPs behind. After changing the
+gateway configuration itself, recreate nginx once with
+`docker compose --env-file .env up -d --force-recreate nginx` so the new configuration is loaded.
+
 For the canonical `hmqa.duckdns.org` single-host deployment, bind the Compose gateway to loopback with `HTTP_PORT=127.0.0.1:8080`. Install `infrastructure/nginx/hmqa-staging.conf` as the host nginx TLS virtual host after obtaining the certificate with the persistent `/var/www/letsencrypt` webroot. The public endpoints are:
 
 - admin: `https://hmqa.duckdns.org/` (`/admin` is a permanent redirect to `/`);

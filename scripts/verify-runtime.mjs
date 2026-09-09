@@ -214,6 +214,17 @@ try {
       '--no-deps',
       'runtime-tests',
       'node',
+      'tests/fixtures/gateway-runtime-probe.mjs',
+    ],
+    { label: 'Reverse proxy API, OpenAPI, admin, and webhook-boundary smoke suite' },
+  );
+  compose(
+    [
+      'run',
+      '--rm',
+      '--no-deps',
+      'runtime-tests',
+      'node',
       'tests/fixtures/telegram-runtime-probe.mjs',
     ],
     {
