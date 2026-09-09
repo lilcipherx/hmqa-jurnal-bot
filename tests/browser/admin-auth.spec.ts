@@ -107,6 +107,17 @@ test('admin auth, protected navigation, staff reset, self re-enrollment, and log
   await page.goto('/dashboard');
   await expect(page.locator('.app-shell')).toBeVisible();
 
+  const localeBffPromise = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/locale',
+  );
+  const localeDestination = await page.goto('/api/locale?locale=en&return=/dashboard');
+  expect((await localeBffPromise).status()).toBe(303);
+  expect(localeDestination?.status()).toBe(200);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  expect(
+    (await page.context().cookies(baseUrl)).find(({ name }) => name === 'hmqa_locale')?.value,
+  ).toBe('en');
+
   await page.locator('a[href="/settings"]').click();
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.locator('.app-shell')).toBeVisible();

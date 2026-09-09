@@ -6,8 +6,15 @@ export function GET(request: Request) {
   const locale = normalizeLocale(url.searchParams.get('locale') ?? undefined);
   const destination = url.searchParams.get('return');
   const safeDestination =
-    destination?.startsWith('/') && !destination.startsWith('//') ? destination : '/dashboard';
-  const response = NextResponse.redirect(new URL(safeDestination, url));
+    destination?.startsWith('/') && !destination.startsWith('//') && !destination.includes('\\')
+      ? destination
+      : '/dashboard';
+  // request.url may contain a container listener such as 0.0.0.0:3000 behind a reverse proxy.
+  // A relative Location keeps the browser on the public origin without trusting forwarded hosts.
+  const response = new NextResponse(null, {
+    status: 303,
+    headers: { location: safeDestination },
+  });
   response.cookies.set('hmqa_locale', locale, {
     httpOnly: true,
     sameSite: 'strict',

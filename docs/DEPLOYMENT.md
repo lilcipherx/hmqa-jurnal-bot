@@ -86,6 +86,7 @@ node -e "const report=require('./.codex-temp/runtime-verification/report.json');
 Then start staging with operator-approved configuration, apply forward migrations through the one-shot service, and inspect readiness:
 
 ```bash
+docker compose --env-file .env --profile monitoring --profile backup build
 docker compose --env-file .env up -d --build postgres redis minio minio-init clamav
 docker compose --env-file .env run --rm migrate
 docker compose --env-file .env up -d api bot worker admin-web nginx
@@ -123,16 +124,18 @@ Production/staging refuses short or placeholder secrets and refuses non-HTTPS pu
 1. Pin the candidate image digest and record the Git SHA.
 2. Validate configuration in a non-production shell and confirm DB/S3/Redis/ClamAV connectivity.
 3. Take a verified pre-deploy backup.
-4. Run the migration one-shot job. It must finish successfully before application rollout.
-5. Roll out API, worker, bot, and admin, then nginx. Keep at least one previous application image available.
-6. Verify live/readiness endpoints, Prometheus targets, queue depth, ClamAV readiness, private-bucket policy, and Sentry ingestion.
-7. Run the smoke path: bot language/consent and slash commands, open test journal, draft persistence, required DOCX/PDF set and rendered preflight, registration, author-owned signed download, staff anonymized-package scan/assignment, public message, revision request, and notification delivery receipt.
-8. Record the exact evidence in the release checklist.
+4. Build the application, migration, and backup images from the same exact checkout. Verify the `org.opencontainers.image.revision` label on every source-built image; a stale one-shot backup image is a mixed deployment and blocks promotion.
+5. Run the migration one-shot job. It must finish successfully before application rollout.
+6. Roll out API, worker, bot, and admin, then nginx. Keep at least one previous application image available.
+7. Verify live/readiness endpoints, Prometheus targets, queue depth, ClamAV readiness, private-bucket policy, and Sentry ingestion.
+8. Run the smoke path: bot language/consent and slash commands, open test journal, draft persistence, required DOCX/PDF set and rendered preflight, registration, author-owned signed download, staff anonymized-package scan/assignment, public message, revision request, and notification delivery receipt.
+9. Record the exact evidence in the release checklist.
 
 For the bundled single-host topology:
 
 ```bash
-docker compose up -d --build
+docker compose --profile monitoring --profile backup build
+docker compose up -d
 docker compose --profile monitoring up -d
 docker compose ps
 ```

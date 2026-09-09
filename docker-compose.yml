@@ -197,6 +197,8 @@ services:
     build:
       context: .
       dockerfile: infrastructure/docker/backup.Dockerfile
+      args:
+        DEPLOYED_SHA: ${DEPLOYED_SHA:-development}
     environment:
       PGHOST: postgres
       PGPORT: 5432

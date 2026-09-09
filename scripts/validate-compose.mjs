@@ -21,6 +21,7 @@ const requiredServices = [
   'worker',
   'admin-web',
   'nginx',
+  'backup',
 ];
 const failures = [];
 
@@ -109,6 +110,10 @@ for (const service of ['migrate', 'api', 'bot', 'worker', 'admin-web']) {
     `${service} image must carry the deployed Git revision build argument`,
   );
 }
+assert(
+  base.services.backup?.build?.args?.DEPLOYED_SHA,
+  'backup image must carry the deployed Git revision build argument',
+);
 assert(test.services['telegram-stub']?.build?.target === 'verification', 'Telegram fixture target');
 assert(test.services['runtime-tests']?.build?.target === 'verification', 'Runtime test target');
 assert(
@@ -143,6 +148,12 @@ assert(!/COPY[^\n]*\.env/i.test(dockerfile), 'Runtime image must not copy enviro
 assert(
   /ENTRYPOINT \["\/usr\/local\/bin\/hmqa-backup"\]/.test(backupDockerfile),
   'Backup entrypoint missing',
+);
+assert(
+  /ARG DEPLOYED_SHA=development[\s\S]*LABEL org\.opencontainers\.image\.revision=\$DEPLOYED_SHA/.test(
+    backupDockerfile,
+  ),
+  'Backup image must expose its source revision',
 );
 assert(
   /restic forget[\s\S]*--tag hmqa[\s\S]*--group-by tags[\s\S]*--keep-daily[\s\S]*--prune/.test(
