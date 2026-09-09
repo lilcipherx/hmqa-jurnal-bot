@@ -1,9 +1,10 @@
 import { journalRequirementConfigSchema } from '@hmqa/contracts';
+import { submissionStatuses } from '@hmqa/domain';
 import { translate, type TranslationKey } from '@hmqa/i18n';
 import { notFound } from 'next/navigation';
 import { PageHeader } from '../../../../components/page-header';
 import { ResourceTable } from '../../../../components/resource-table';
-import { TransitionForm, transitionStatuses } from '../../../../components/transition-form';
+import { TransitionForm } from '../../../../components/transition-form';
 import { DecisionForm } from '../../../../components/decision-form';
 import { AssignmentForms } from '../../../../components/assignment-forms';
 import { MessageForm } from '../../../../components/message-form';
@@ -496,7 +497,7 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
             rejectDecision: translate(locale, 'admin.decision.reject'),
           }}
           statusLabels={Object.fromEntries(
-            transitionStatuses.map((status) => [
+            submissionStatuses.map((status) => [
               status,
               translate(locale, `status.${status.toLowerCase()}` as TranslationKey),
             ]),

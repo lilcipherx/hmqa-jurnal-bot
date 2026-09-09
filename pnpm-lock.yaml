@@ -62,6 +62,9 @@ importers:
       '@hmqa/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@hmqa/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@hmqa/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n

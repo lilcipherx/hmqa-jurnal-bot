@@ -8,24 +8,6 @@ function text(form: FormData, name: string): string {
   return typeof value === 'string' ? value : '';
 }
 
-export const transitionStatuses = [
-  'SUBMITTED',
-  'TECHNICAL_REVIEW',
-  'NEEDS_CORRECTION',
-  'REGISTERED',
-  'EDITORIAL_REVIEW',
-  'UNDER_REVIEW',
-  'REVISION_REQUESTED',
-  'REVISION_SUBMITTED',
-  'ACCEPTED',
-  'REJECTED',
-  'COPYEDITING',
-  'LAYOUT',
-  'PUBLISHED',
-  'WITHDRAWN',
-  'ARCHIVED',
-];
-
 export function TransitionForm({
   submissionId,
   rowVersion,
