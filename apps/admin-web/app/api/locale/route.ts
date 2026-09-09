@@ -1,6 +1,15 @@
 import { NextResponse } from 'next/server';
 import { normalizeLocale } from '@hmqa/i18n';
 
+function isSecureRequest(request: Request): boolean {
+  const forwardedProtocol = request.headers
+    .get('x-forwarded-proto')
+    ?.split(',', 1)[0]
+    ?.trim()
+    .toLowerCase();
+  return (forwardedProtocol ?? new URL(request.url).protocol.replace(':', '')) === 'https';
+}
+
 export function GET(request: Request) {
   const url = new URL(request.url);
   const locale = normalizeLocale(url.searchParams.get('locale') ?? undefined);
@@ -18,7 +27,7 @@ export function GET(request: Request) {
   response.cookies.set('hmqa_locale', locale, {
     httpOnly: true,
     sameSite: 'strict',
-    secure: process.env.NODE_ENV === 'production',
+    secure: isSecureRequest(request),
     maxAge: 365 * 24 * 60 * 60,
     path: '/',
   });

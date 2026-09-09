@@ -8,7 +8,9 @@ describe('admin locale BFF', () => {
     vi.stubEnv('NODE_ENV', 'production');
 
     const response = GET(
-      new Request('http://0.0.0.0:3000/api/locale?locale=uz-Latn&return=/dashboard'),
+      new Request('http://0.0.0.0:3000/api/locale?locale=uz-Latn&return=/dashboard', {
+        headers: { 'x-forwarded-proto': 'https' },
+      }),
     );
 
     expect(response.status).toBe(303);
@@ -36,4 +38,20 @@ describe('admin locale BFF', () => {
       expect(response.headers.get('location')).toBe('/dashboard');
     },
   );
+
+  it('allows the locale cookie on the isolated HTTP verification gateway', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+
+    const response = GET(
+      new Request('http://admin-web.test/api/locale?locale=en&return=/dashboard', {
+        headers: { 'x-forwarded-proto': 'http' },
+      }),
+    );
+
+    const localeCookie = response.headers
+      .getSetCookie()
+      .find((value) => value.startsWith('hmqa_locale='));
+    expect(localeCookie).toBeDefined();
+    expect(localeCookie).not.toMatch(/;\s*Secure(?:;|$)/i);
+  });
 });
