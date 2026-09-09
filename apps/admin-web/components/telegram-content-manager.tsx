@@ -159,7 +159,7 @@ export function TelegramContentManager({
           </label>
         </fieldset>
       ))}
-      <button className="button" disabled={Boolean(busy)}>
+      <button className="button" type="submit" disabled={Boolean(busy)}>
         {labels.save}
       </button>
     </form>
@@ -209,7 +209,7 @@ export function TelegramContentManager({
                   />
                 </label>
               ))}
-              <button className="button" disabled={Boolean(busy)}>
+              <button className="button" type="submit" disabled={Boolean(busy)}>
                 {labels.save}
               </button>
             </form>

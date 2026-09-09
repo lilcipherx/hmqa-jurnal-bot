@@ -347,7 +347,7 @@ export function JournalManager({
               <input name="acceptanceClosesAt" type="datetime-local" />
             </label>
           </fieldset>
-          <button className="button" disabled={busy}>
+          <button className="button" type="submit" disabled={busy}>
             {labels.create}
           </button>
         </form>
@@ -488,7 +488,7 @@ export function JournalManager({
             <textarea name={`requirement_contact_${suffix}`} placeholder={labels.contact} />
           </fieldset>
         ))}
-        <button className="button" disabled={busy}>
+        <button className="button" type="submit" disabled={busy}>
           {labels.create}
         </button>
       </form>
@@ -594,7 +594,7 @@ export function JournalManager({
                   </fieldset>
                 );
               })}
-              <button className="button" disabled={busy}>
+              <button className="button" type="submit" disabled={busy}>
                 {labels.save}
               </button>
             </form>
@@ -877,7 +877,7 @@ export function JournalManager({
                             </fieldset>
                           );
                         })}
-                        <button className="button" disabled={busy}>
+                        <button className="button" type="submit" disabled={busy}>
                           {labels.save}
                         </button>
                       </form>
