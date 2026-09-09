@@ -19,25 +19,35 @@ test('admin session survives SSR, refresh, protected navigation, and is revoked 
   await page.locator('input[name="password"]').fill(password);
   await page.locator('input[name="totp"]').fill(generateTotpCode(totpSecret));
 
-  const loginResponsePromise = page.waitForResponse(
-    (response) => new URL(response.url()).pathname === '/api/auth/login',
-  );
-  const dashboardRequestPromise = page.waitForRequest(
-    (request) => new URL(request.url()).pathname === '/dashboard' && request.isNavigationRequest(),
-  );
+  // Capture evidence while the login document still owns the response body.
+  // `window.location.assign` destroys that document immediately after the client
+  // consumes the JSON, and retaining only the Response can make CDP lose its body.
+  const loginEvidencePromise = page
+    .waitForResponse((response) => new URL(response.url()).pathname === '/api/auth/login')
+    .then(async (response) => ({
+      body: (await response.json()) as Record<string, unknown>,
+      headers: await response.headersArray(),
+      status: response.status(),
+    }));
+  const dashboardEvidencePromise = page
+    .waitForRequest(
+      (request) =>
+        new URL(request.url()).pathname === '/dashboard' && request.isNavigationRequest(),
+    )
+    .then(async (request) => ({ headers: await request.allHeaders() }));
   await page.locator('button[type="submit"]').click();
 
-  const loginResponse = await loginResponsePromise;
-  expect(loginResponse.status()).toBe(200);
-  const responseShape = Object.keys((await loginResponse.json()) as Record<string, unknown>).sort();
+  const loginEvidence = await loginEvidencePromise;
+  expect(loginEvidence.status).toBe(200);
+  const responseShape = Object.keys(loginEvidence.body).sort();
   expect(responseShape).toEqual(['csrfToken', 'expiresAt', 'sessionId']);
-  const setCookies = (await loginResponse.headersArray()).filter(
+  const setCookies = loginEvidence.headers.filter(
     ({ name }) => name.toLowerCase() === 'set-cookie',
   );
   expect(setCookies).toHaveLength(2);
 
-  const dashboardRequest = await dashboardRequestPromise;
-  const dashboardCookie = (await dashboardRequest.allHeaders()).cookie ?? '';
+  const dashboardEvidence = await dashboardEvidencePromise;
+  const dashboardCookie = dashboardEvidence.headers.cookie ?? '';
   expect(dashboardCookie).toMatch(/(?:^|;\s*)hmqa_session=/);
   await expect(page).toHaveURL(/\/dashboard$/);
 
