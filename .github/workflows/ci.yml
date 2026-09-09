@@ -14,11 +14,11 @@ concurrency:
 
 jobs:
   quality:
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with: { persist-credentials: false }
+        with: { persist-credentials: false, fetch-depth: 0 }
       - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
         with: { version: 11.19.0, run_install: false }
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -29,6 +29,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm --filter @hmqa/database exec prisma validate
+      - run: pnpm compose:validate
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
@@ -36,10 +37,11 @@ jobs:
       - run: pnpm test
       - run: pnpm test:i18n
       - run: pnpm security:secrets
+      - run: pnpm security:public
       - run: pnpm audit --audit-level moderate
 
   integration:
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     services:
       postgres:
@@ -81,6 +83,10 @@ jobs:
       - run: pnpm db:generate
       - run: pnpm build
       - run: pnpm db:migrate
+      - name: Verify migration status and schema drift
+        run: |
+          pnpm --filter @hmqa/database exec prisma migrate status
+          pnpm --filter @hmqa/database exec prisma migrate diff --exit-code --from-schema packages/database/prisma/schema.prisma --to-config-datasource
       - name: Verify idempotent development seed
         env:
           SEED_ADMIN_EMAIL: ci-admin@example.invalid
@@ -92,7 +98,7 @@ jobs:
       - run: pnpm test:e2e:required
 
   runtime:
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       HMQA_RUNTIME_PROJECT: hmqa-verification-${{ github.run_id }}-${{ github.run_attempt }}
@@ -119,7 +125,7 @@ jobs:
   required:
     if: always()
     needs: [quality, integration, runtime]
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     steps:
       - name: Enforce all required jobs
         env:
