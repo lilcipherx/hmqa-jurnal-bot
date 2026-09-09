@@ -130,6 +130,7 @@ jobs:
             .codex-temp/runtime-verification/report.json
             .codex-temp/test-reports/*.json
           if-no-files-found: error
+          include-hidden-files: true
 
   required:
     if: always()

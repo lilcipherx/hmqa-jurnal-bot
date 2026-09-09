@@ -51,9 +51,9 @@ const result = spawnSync(
     'run',
     '--config',
     config,
+    '--reporter=default',
     '--reporter=json',
-    '--outputFile',
-    reportPath,
+    `--outputFile.json=${reportPath}`,
   ],
   {
     env: { ...process.env, REQUIRE_RUNTIME_TESTS: 'true' },
