@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { forbidden, notFound } from 'next/navigation';
 
 function apiUrl(): string {
   const value = process.env.API_INTERNAL_URL;
@@ -20,6 +21,8 @@ export async function adminFetch<T>(path: string): Promise<T> {
     cache: 'no-store',
     signal: AbortSignal.timeout(12_000),
   });
+  if (response.status === 403) forbidden();
+  if (response.status === 404) notFound();
   if (!response.ok) throw new AdminApiError(response.status);
   return response.json() as Promise<T>;
 }

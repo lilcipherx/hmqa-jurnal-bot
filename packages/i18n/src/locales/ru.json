@@ -134,6 +134,7 @@
   "error.preflight_incomplete": "Один или несколько файлов ещё не прошли проверку безопасности и техническую проверку.",
   "error.stale_action": "Эта кнопка устарела. Текущее состояние обновлено.",
   "error.forbidden": "У вас нет права выполнять это действие.",
+  "admin.error.forbidden_heading": "Доступ запрещён",
   "error.system": "Произошла техническая ошибка. Код обращения: {correlation_id}",
   "admin.nav.dashboard": "Панель управления",
   "admin.nav.submissions": "Статьи",

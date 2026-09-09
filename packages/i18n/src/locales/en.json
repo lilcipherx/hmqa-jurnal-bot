@@ -134,6 +134,7 @@
   "error.preflight_incomplete": "One or more files have not completed security and technical checks.",
   "error.stale_action": "This button is outdated. The current state was refreshed.",
   "error.forbidden": "You are not allowed to perform this action.",
+  "admin.error.forbidden_heading": "Access denied",
   "error.system": "A technical error occurred. Reference code: {correlation_id}",
   "admin.nav.dashboard": "Dashboard",
   "admin.nav.submissions": "Submissions",

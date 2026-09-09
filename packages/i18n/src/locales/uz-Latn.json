@@ -134,6 +134,7 @@
   "error.preflight_incomplete": "Bir yoki bir nechta fayl xavfsizlik va texnik tekshiruvni yakunlamagan.",
   "error.stale_action": "Bu tugma eskirgan. Joriy holat yangilandi.",
   "error.forbidden": "Bu amalni bajarish huquqingiz yo‘q.",
+  "admin.error.forbidden_heading": "Kirish taqiqlangan",
   "error.system": "Texnik xatolik yuz berdi. Murojaat kodi: {correlation_id}",
   "admin.nav.dashboard": "Boshqaruv paneli",
   "admin.nav.submissions": "Maqolalar",

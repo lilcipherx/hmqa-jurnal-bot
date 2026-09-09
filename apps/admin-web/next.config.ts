@@ -5,6 +5,9 @@ const config: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   typedRoutes: true,
+  experimental: {
+    authInterrupts: true,
+  },
   headers() {
     return Promise.resolve([
       {
