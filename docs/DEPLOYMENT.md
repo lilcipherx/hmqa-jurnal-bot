@@ -98,7 +98,7 @@ Do not expose PostgreSQL, Redis, MinIO, ClamAV, worker, or internal API addresse
 
 ## Configuration and secrets
 
-Use `.env.example` as the inventory, not as production values. Generate independent values for session signing, envelope encryption, service authentication, webhook verification, S3, metrics, and backup encryption. Store the environment file with owner-only permissions or inject secrets from the platform secret manager.
+Use `.env.example` as the inventory, not as production values. Generate independent values for session signing, envelope encryption, service authentication, webhook verification, S3, MinIO KMS, metrics, and backup encryption. `MINIO_KMS_SECRET_KEY` must use `<key-name>:<base64-encoded-random-32-byte-key>`; back it up separately because losing it makes encrypted MinIO data unrecoverable. Store the environment file with owner-only permissions or inject secrets from the platform secret manager. For managed S3, replace the bundled MinIO topology with the provider's private, versioned, KMS-backed bucket configuration and keep the application's SSE requirement enabled.
 
 Production/staging refuses short or placeholder secrets and refuses non-HTTPS public URLs. Local staff authentication is disabled in production unless `LOCAL_AUTH_PRODUCTION_ENABLED=true` is an explicit approved policy. When local authentication is selected, every account must complete the invitation flow and TOTP enrollment.
 

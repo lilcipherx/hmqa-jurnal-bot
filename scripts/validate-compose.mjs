@@ -64,6 +64,10 @@ assert(
   'Worker must disable privilege escalation',
 );
 assert(base.services.worker?.cap_drop?.includes('ALL'), 'Worker must drop Linux capabilities');
+assert(
+  Boolean(base.services.minio?.environment?.MINIO_KMS_SECRET_KEY),
+  'MinIO must require a KMS secret key for server-side encryption',
+);
 assert(base.networks?.backend, 'Backend network is missing');
 
 for (const service of ['telegram-stub', 'runtime-tests', 'postgres-recovery', 'minio-recovery']) {
@@ -71,6 +75,10 @@ for (const service of ['telegram-stub', 'runtime-tests', 'postgres-recovery', 'm
 }
 assert(test.services['telegram-stub']?.build?.target === 'verification', 'Telegram fixture target');
 assert(test.services['runtime-tests']?.build?.target === 'verification', 'Runtime test target');
+assert(
+  Boolean(test.services['minio-recovery']?.environment?.MINIO_KMS_SECRET_KEY),
+  'Recovery MinIO must enable server-side encryption',
+);
 
 assert(
   /FROM runtime-base AS runtime\s*[\s\S]*USER node\s*[\s\S]*CMD/.test(dockerfile),

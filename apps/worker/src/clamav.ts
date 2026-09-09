@@ -44,7 +44,9 @@ export async function scanFile(
   }
   const terminator = Buffer.alloc(4);
   await new Promise<void>((resolve) => socket.end(terminator, resolve));
-  const message = await result;
+  // ClamAV's zero-terminated protocol includes the trailing NUL byte in the
+  // response. Normalise protocol framing before interpreting the status.
+  const message = (await result).replaceAll('\0', '').trim();
   if (message.endsWith('OK')) return { status: 'CLEAN', response: message };
   const found = message.match(/: (.+) FOUND$/);
   if (found?.[1]) return { status: 'INFECTED', signature: found[1], response: message };

@@ -24,7 +24,7 @@ Sensitive fields include author contact data, manuscripts, review identities/com
 
 Rotate service/webhook/session/S3/backup credentials independently. Rotating `ENCRYPTION_KEY` requires a versioned re-encryption migration because ciphertext carries a format version but currently uses one configured key. Revoke all staff sessions after session-secret compromise. Update the BotFather webhook secret and deployment atomically.
 
-Never put production secrets in Git, images, Compose YAML, seed data, issue comments, or ordinary logs.
+Never put production secrets in Git, images, Compose YAML, seed data, issue comments, or ordinary logs. The bundled MinIO service requires a deployment-specific KMS secret through `MINIO_KMS_SECRET_KEY`; it must be escrowed and rotated under the Academy's key-management procedure.
 
 ## Residual and external controls
 
