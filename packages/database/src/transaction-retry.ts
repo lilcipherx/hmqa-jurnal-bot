@@ -33,6 +33,7 @@ export async function withSerializableTransactionRetry<T>(
 }
 
 interface SerializableTransactionOptions {
+  readonly lockAuditChain?: boolean;
   readonly maxAttempts?: number;
   readonly maxWait?: number;
   readonly timeout?: number;
@@ -45,11 +46,18 @@ export function serializableTransactionWithRetry<T>(
 ): Promise<T> {
   return withSerializableTransactionRetry(
     () =>
-      database.$transaction(operation, {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-        ...(options.maxWait === undefined ? {} : { maxWait: options.maxWait }),
-        ...(options.timeout === undefined ? {} : { timeout: options.timeout }),
-      }),
+      database.$transaction(
+        async (transaction) => {
+          if (options.lockAuditChain)
+            await transaction.$executeRaw`SELECT pg_advisory_xact_lock(4815162342)`;
+          return operation(transaction);
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          ...(options.maxWait === undefined ? {} : { maxWait: options.maxWait }),
+          ...(options.timeout === undefined ? {} : { timeout: options.timeout }),
+        },
+      ),
     options.maxAttempts,
   );
 }

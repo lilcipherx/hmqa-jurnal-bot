@@ -34,13 +34,16 @@ describe('serializable transaction retry', () => {
   });
 
   it('always requests serializable isolation from Prisma', async () => {
-    const transaction = vi.fn().mockResolvedValue('committed');
+    const executeRaw = vi.fn().mockResolvedValue(1);
+    const transaction = vi.fn((operation: (client: unknown) => Promise<unknown>) =>
+      operation({ $executeRaw: executeRaw }),
+    );
 
     await expect(
       serializableTransactionWithRetry(
         { $transaction: transaction } as never,
         () => Promise.resolve('committed'),
-        { maxWait: 5_000, timeout: 10_000 },
+        { lockAuditChain: true, maxWait: 5_000, timeout: 10_000 },
       ),
     ).resolves.toBe('committed');
     expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
@@ -48,5 +51,6 @@ describe('serializable transaction retry', () => {
       maxWait: 5_000,
       timeout: 10_000,
     });
+    expect(executeRaw).toHaveBeenCalledOnce();
   });
 });

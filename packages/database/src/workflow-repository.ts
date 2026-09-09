@@ -216,6 +216,6 @@ export async function transitionSubmission(
         auditId: audit.id,
       };
     },
-    { maxWait: 5_000, timeout: 10_000 },
+    { lockAuditChain: true, maxWait: 5_000, timeout: 10_000 },
   );
 }

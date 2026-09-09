@@ -1167,7 +1167,7 @@ export async function createApp({
           });
           return { item, created: true };
         },
-        {},
+        { lockAuditChain: true },
       );
       return reply.code(result.created ? 201 : 200).send({
         id: result.item.id,
@@ -1519,7 +1519,7 @@ export async function createApp({
           });
           return { id: updated.id, updatedAt: updated.updatedAt };
         },
-        {},
+        { lockAuditChain: true },
       );
       if (!result)
         return reply.code(409).send({
@@ -2361,6 +2361,7 @@ export async function createApp({
           });
         },
         {
+          lockAuditChain: true,
           maxWait: 5_000,
           timeout: 15_000,
         },
@@ -3679,7 +3680,7 @@ export async function createApp({
             });
             return { submissionVersionId, versionNo };
           },
-          {},
+          { lockAuditChain: true },
         );
         await fileQueue.add(
           jobNames.ingestTelegramFile,
@@ -4730,7 +4731,7 @@ export async function createApp({
           });
           return after;
         },
-        {},
+        { lockAuditChain: true },
       );
       if (!updated)
         return reply.code(409).send({
