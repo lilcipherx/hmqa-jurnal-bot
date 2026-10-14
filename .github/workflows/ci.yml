@@ -104,7 +104,7 @@ jobs:
       - run: pnpm test:e2e:required
       - name: Preserve integration evidence
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: focused-test-reports-${{ github.run_id }}-${{ github.run_attempt }}
           path: .codex-temp/test-reports/*.json
@@ -130,7 +130,7 @@ jobs:
       - run: pnpm verify:runtime
       - name: Preserve runtime evidence
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: runtime-verification-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
